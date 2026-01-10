@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Python virtual environments
+.venv/
+__pycache__/
+*.pyc
+
+# AI assistant data
+.claude/
+.serena/
+
+# Temporary files
+tmp*.png
+*.tmp
+
+# App bundles (build output)
+*.app/
+
+# HuggingFace cache (large models)
+models/
+
+# Environment files
+.env
+.env.local
