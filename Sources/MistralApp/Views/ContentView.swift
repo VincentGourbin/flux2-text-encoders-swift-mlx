@@ -29,12 +29,10 @@ struct ContentView: View {
                 }
 
                 Section("Tools") {
-                    Label("Embeddings", systemImage: "cube.transparent")
+                    Label("FLUX.2 Tools", systemImage: "cube.transparent")
                         .tag(3)
-                    Label("Upsampling", systemImage: "wand.and.stars")
-                        .tag(4)
                     Label("Models", systemImage: "square.stack.3d.down.right")
-                        .tag(5)
+                        .tag(4)
                 }
             }
             .listStyle(.sidebar)
@@ -59,10 +57,8 @@ struct ContentView: View {
                     case 2:
                         VisionView()
                     case 3:
-                        EmbeddingsView()
+                        FluxToolsView()
                     case 4:
-                        UpsamplingView()
-                    case 5:
                         ModelsManagementView()
                     default:
                         ChatView(viewModel: chatViewModel)
@@ -888,194 +884,231 @@ struct VisionView: View {
     }
 }
 
-// MARK: - Embeddings View
+// MARK: - FLUX.2 Tools View
 
-struct EmbeddingsView: View {
+enum FluxToolMode: String, CaseIterable {
+    case embeddings = "Embeddings"
+    case upsamplingT2I = "Upsampling T2I"
+    case upsamplingI2I = "Upsampling I2I"
+
+    var icon: String {
+        switch self {
+        case .embeddings: return "cube.transparent"
+        case .upsamplingT2I: return "wand.and.stars"
+        case .upsamplingI2I: return "photo.on.rectangle"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .embeddings: return "Extract FLUX.2 embeddings (512×15360)"
+        case .upsamplingT2I: return "Enhance text prompts for image generation"
+        case .upsamplingI2I: return "Generate image editing instructions"
+        }
+    }
+}
+
+struct FluxToolsView: View {
     @EnvironmentObject var modelManager: ModelManager
+    @State private var selectedMode: FluxToolMode = .embeddings
     @State private var prompt = ""
-    @State private var layers = "10,20,30"
-    @State private var embeddingsInfo = ""
-    @State private var isExtracting = false
-    @State private var useFluxFormat = true
+    @State private var imagePath: String?
+    @State private var outputText = ""
+    @State private var isProcessing = false
     @State private var lastEmbeddings: MLXArray?
 
     var body: some View {
         VStack(spacing: 16) {
             // Mode selector
             HStack {
-                Picker("Format", selection: $useFluxFormat) {
-                    Text("FLUX.2 Compatible").tag(true)
-                    Text("Custom Layers").tag(false)
+                Picker("Mode", selection: $selectedMode) {
+                    ForEach(FluxToolMode.allCases, id: \.self) { mode in
+                        Label(mode.rawValue, systemImage: mode.icon).tag(mode)
+                    }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 280)
 
                 Spacer()
 
-                if useFluxFormat {
-                    Text("512 tokens × 15,360 dims")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(4)
-                }
+                Text(selectedMode.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.purple.opacity(0.1))
+                    .cornerRadius(4)
             }
 
-            GroupBox("Text Prompt") {
-                TextEditor(text: $prompt)
-                    .font(.body)
-                    .frame(minHeight: 100)
-            }
-
-            if useFluxFormat {
-                // FLUX.2 format info
-                GroupBox {
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("FLUX.2 Format")
-                                .font(.caption.bold())
-                            Text("Layers: 10, 20, 30")
-                                .font(.caption)
+            // Image picker (for I2I mode - placeholder for future VLM integration)
+            if selectedMode == .upsamplingI2I {
+                GroupBox("Reference Image (optional)") {
+                    HStack {
+                        if let path = imagePath {
+                            Text(URL(fileURLWithPath: path).lastPathComponent)
                                 .foregroundStyle(.secondary)
-                        }
-
-                        Divider()
-                            .frame(height: 30)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Chat Template")
-                                .font(.caption.bold())
-                            Text("System + User messages")
-                                .font(.caption)
+                            Spacer()
+                            Button("Clear") { imagePath = nil }
+                        } else {
+                            Text("No image selected")
                                 .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Select...") { selectImage() }
                         }
-
-                        Divider()
-                            .frame(height: 30)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Padding")
-                                .font(.caption.bold())
-                            Text("LEFT-pad to 512 tokens")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
                     }
                     .padding(.vertical, 4)
                 }
-            } else {
-                // Custom layers input
-                GroupBox("Layers") {
-                    TextField("e.g., 10,20,30", text: $layers)
-                        .textFieldStyle(.plain)
+            }
+
+            // Prompt input
+            GroupBox(selectedMode == .embeddings ? "Text to Embed" : "Input Prompt") {
+                TextEditor(text: $prompt)
+                    .font(.body)
+                    .frame(minHeight: 80)
+            }
+
+            // System prompt info (for upsampling modes)
+            if selectedMode != .embeddings {
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("System Prompt (BFL Official)")
+                            .font(.caption.bold())
+                        let fluxMode: FluxConfig.Mode = selectedMode == .upsamplingT2I ? .upsamplingT2I : .upsamplingI2I
+                        Text(FluxConfig.systemMessage(for: fluxMode).prefix(150) + "...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
+            // Action buttons
             HStack {
-                Button(action: extractEmbeddings) {
+                Button(action: processAction) {
                     HStack {
-                        if isExtracting {
+                        if isProcessing {
                             ProgressView()
                                 .scaleEffect(0.8)
                         }
-                        Text(isExtracting ? "Extracting..." : "Extract Embeddings")
+                        Text(isProcessing ? "Processing..." : actionButtonTitle)
                     }
                 }
-                .disabled(prompt.isEmpty || isExtracting || !modelManager.isLoaded)
+                .disabled(prompt.isEmpty || isProcessing || !modelManager.isLoaded)
 
-                Button("Export...") {
-                    exportEmbeddings()
+                Spacer()
+
+                if selectedMode == .embeddings {
+                    Button("Export...") { exportEmbeddings() }
+                        .disabled(lastEmbeddings == nil)
+                } else {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(outputText, forType: .string)
+                    }
+                    .disabled(outputText.isEmpty)
                 }
-                .disabled(lastEmbeddings == nil)
             }
 
-            GroupBox("Embeddings Info") {
+            // Output
+            GroupBox(selectedMode == .embeddings ? "Embeddings Info" : "Output") {
                 ScrollView {
-                    Text(embeddingsInfo.isEmpty ? "Enter text and click Extract to see embeddings info" : embeddingsInfo)
-                        .font(.system(.body, design: .monospaced))
+                    Text(outputText.isEmpty ? placeholderText : outputText)
+                        .font(selectedMode == .embeddings ? .system(.body, design: .monospaced) : .body)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .foregroundColor(embeddingsInfo.isEmpty ? .secondary : .primary)
+                        .foregroundColor(outputText.isEmpty ? .secondary : .primary)
                         .textSelection(.enabled)
                 }
-                .frame(minHeight: 200)
+                .frame(minHeight: 180)
             }
 
             Spacer()
         }
         .padding()
+        .onChange(of: selectedMode) { _, _ in
+            outputText = ""
+            lastEmbeddings = nil
+        }
     }
 
-    private func extractEmbeddings() {
-        isExtracting = true
-        embeddingsInfo = ""
-        lastEmbeddings = nil
+    private var actionButtonTitle: String {
+        switch selectedMode {
+        case .embeddings: return "Extract Embeddings"
+        case .upsamplingT2I, .upsamplingI2I: return "Upsample Prompt"
+        }
+    }
+
+    private var placeholderText: String {
+        switch selectedMode {
+        case .embeddings: return "Enter text and click Extract to see embeddings info"
+        case .upsamplingT2I: return "Enter a simple prompt to enhance it for FLUX.2"
+        case .upsamplingI2I: return "Describe the edit you want (e.g., 'make the sky more dramatic')"
+        }
+    }
+
+    private func selectImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK {
+            imagePath = panel.url?.path
+        }
+    }
+
+    private func processAction() {
+        isProcessing = true
+        outputText = ""
 
         Task {
             do {
-                let embeddings: MLXArray
-
-                if useFluxFormat {
-                    // Use FLUX.2 compatible extraction
-                    embeddings = try MistralCore.shared.extractFluxEmbeddings(prompt: prompt)
-
+                switch selectedMode {
+                case .embeddings:
+                    let embeddings = try MistralCore.shared.extractFluxEmbeddings(prompt: prompt)
                     await MainActor.run {
                         lastEmbeddings = embeddings
                         let flatEmbeddings = embeddings.reshaped([-1])
                         let firstValues = flatEmbeddings[0..<min(10, flatEmbeddings.size)].asArray(Float.self)
-
-                        embeddingsInfo = """
-                        === FLUX.2 Compatible Embeddings ===
+                        outputText = """
+                        === FLUX.2 Embeddings ===
 
                         Shape: \(embeddings.shape)
                         Dtype: \(embeddings.dtype)
-                        Total elements: \(embeddings.shape.reduce(1, *))
+                        Total: \(embeddings.shape.reduce(1, *)) elements
 
-                        Format Details:
+                        Format:
                         • Layers: 10, 20, 30 (concatenated)
                         • Sequence: 512 tokens (LEFT-padded)
-                        • Hidden dim: 5,120 × 3 = 15,360
+                        • Dims: 5,120 × 3 = 15,360
 
                         First 10 values:
                         \(firstValues.map { String(format: "%.6f", $0) }.joined(separator: ", "))
 
-                        ✅ Ready for FLUX.2 diffusion model
+                        ✅ Ready for FLUX.2
                         """
-                        isExtracting = false
+                        isProcessing = false
                     }
-                } else {
-                    // Use custom layer extraction
-                    let layerIndices = layers.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-                    let config = HiddenStatesConfig(layerIndices: layerIndices, concatenate: true, normalize: false)
 
-                    embeddings = try MistralCore.shared.extractEmbeddings(prompt: prompt, config: config)
+                case .upsamplingT2I, .upsamplingI2I:
+                    let fluxMode: FluxConfig.Mode = selectedMode == .upsamplingT2I ? .upsamplingT2I : .upsamplingI2I
+                    let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
+
+                    var result = ""
+                    _ = try MistralCore.shared.chat(
+                        messages: messages,
+                        parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
+                    ) { token in
+                        result += token
+                        return true
+                    }
 
                     await MainActor.run {
-                        lastEmbeddings = embeddings
-                        let flatEmbeddings = embeddings.reshaped([-1])
-                        let firstValues = flatEmbeddings[0..<min(10, flatEmbeddings.size)].asArray(Float.self)
-
-                        embeddingsInfo = """
-                        === Custom Layer Embeddings ===
-
-                        Shape: \(embeddings.shape)
-                        Dtype: \(embeddings.dtype)
-                        Layers: \(layerIndices)
-                        Total elements: \(embeddings.shape.reduce(1, *))
-
-                        First 10 values:
-                        \(firstValues.map { String(format: "%.6f", $0) }.joined(separator: ", "))
-                        """
-                        isExtracting = false
+                        outputText = result
+                        isProcessing = false
                     }
                 }
             } catch {
                 await MainActor.run {
-                    embeddingsInfo = "Error: \(error.localizedDescription)"
-                    isExtracting = false
+                    outputText = "Error: \(error.localizedDescription)"
+                    isProcessing = false
                 }
             }
         }
@@ -1086,135 +1119,14 @@ struct EmbeddingsView: View {
 
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.data]
-        panel.nameFieldStringValue = useFluxFormat ? "flux_embeddings.bin" : "embeddings.bin"
+        panel.nameFieldStringValue = "flux_embeddings.bin"
 
         if panel.runModal() == .OK, let url = panel.url {
             do {
                 try MistralCore.shared.exportEmbeddings(embeddings, to: url.path, format: .binary)
-                embeddingsInfo += "\n\n✅ Exported to: \(url.lastPathComponent)"
+                outputText += "\n\n✅ Exported to: \(url.lastPathComponent)"
             } catch {
-                embeddingsInfo += "\n\n❌ Export failed: \(error.localizedDescription)"
-            }
-        }
-    }
-}
-
-// MARK: - Upsampling View
-
-struct UpsamplingView: View {
-    @EnvironmentObject var modelManager: ModelManager
-    @State private var inputPrompt = ""
-    @State private var outputPrompt = ""
-    @State private var isProcessing = false
-    @State private var selectedMode: FluxConfig.Mode = .upsamplingT2I
-
-    var body: some View {
-        VStack(spacing: 16) {
-            // Mode selector
-            HStack {
-                Picker("Mode", selection: $selectedMode) {
-                    Text("Text-to-Image").tag(FluxConfig.Mode.upsamplingT2I)
-                    Text("Image-to-Image").tag(FluxConfig.Mode.upsamplingI2I)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 280)
-
-                Spacer()
-
-                Text(selectedMode == .upsamplingT2I ? "Enhance prompts" : "Edit instructions")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.purple.opacity(0.1))
-                    .cornerRadius(4)
-            }
-
-            // System prompt info
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("System Prompt")
-                        .font(.caption.bold())
-                    Text(FluxConfig.systemMessage(for: selectedMode).prefix(200) + "...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // Input
-            GroupBox("Input Prompt") {
-                TextEditor(text: $inputPrompt)
-                    .font(.body)
-                    .frame(minHeight: 80)
-            }
-
-            // Action button
-            HStack {
-                Button(action: upsamplePrompt) {
-                    HStack {
-                        if isProcessing {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                        }
-                        Text(isProcessing ? "Processing..." : "Upsample Prompt")
-                    }
-                }
-                .disabled(inputPrompt.isEmpty || isProcessing || !modelManager.isLoaded)
-
-                Spacer()
-
-                Button("Copy Output") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(outputPrompt, forType: .string)
-                }
-                .disabled(outputPrompt.isEmpty)
-            }
-
-            // Output
-            GroupBox("Enhanced Prompt") {
-                ScrollView {
-                    Text(outputPrompt.isEmpty ? "Enter a prompt and click Upsample to enhance it" : outputPrompt)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .foregroundColor(outputPrompt.isEmpty ? .secondary : .primary)
-                        .textSelection(.enabled)
-                }
-                .frame(minHeight: 150)
-            }
-
-            Spacer()
-        }
-        .padding()
-    }
-
-    private func upsamplePrompt() {
-        isProcessing = true
-        outputPrompt = ""
-
-        Task {
-            do {
-                let messages = FluxConfig.buildMessages(prompt: inputPrompt, mode: selectedMode)
-
-                var result = ""
-                _ = try MistralCore.shared.chat(
-                    messages: messages,
-                    parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
-                ) { token in
-                    result += token
-                    return true
-                }
-
-                await MainActor.run {
-                    outputPrompt = result
-                    isProcessing = false
-                }
-            } catch {
-                await MainActor.run {
-                    outputPrompt = "Error: \(error.localizedDescription)"
-                    isProcessing = false
-                }
+                outputText += "\n\n❌ Export failed: \(error.localizedDescription)"
             }
         }
     }
