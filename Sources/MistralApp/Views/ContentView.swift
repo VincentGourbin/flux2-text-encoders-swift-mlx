@@ -993,7 +993,7 @@ struct FluxToolsView: View {
                         Text(isProcessing ? "Processing..." : actionButtonTitle)
                     }
                 }
-                .disabled(prompt.isEmpty || isProcessing || !modelManager.isLoaded)
+                .disabled(prompt.isEmpty || isProcessing || (!modelManager.isLoaded && !modelManager.isVLMLoaded))
 
                 Spacer()
 
