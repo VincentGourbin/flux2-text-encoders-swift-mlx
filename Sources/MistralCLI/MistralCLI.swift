@@ -18,6 +18,7 @@ struct MistralCLI: AsyncParsableCommand {
             Generate.self,
             Chat.self,
             Embed.self,
+            Upsample.self,
             Vision.self,
             Models.self,
         ],
@@ -400,6 +401,86 @@ struct Embed: AsyncParsableCommand {
         let mean = allValues.reduce(0, +) / Float(allValues.count)
         print("\(label) Range: [\(String(format: "%.4f", minVal)), \(String(format: "%.4f", maxVal))]")
         print("\(label) Mean: \(String(format: "%.6f", mean))")
+    }
+}
+
+// MARK: - Upsample Command
+
+struct Upsample: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Upsample/enhance prompts for FLUX.2 image generation"
+    )
+
+    @OptionGroup var modelOptions: ModelOptions
+    @OptionGroup var genOptions: GenerationOptions
+
+    @Argument(help: "Input prompt to enhance")
+    var prompt: String
+
+    @Option(name: .shortAndLong, help: "Mode: t2i (text-to-image) or i2i (image-to-image)")
+    var mode: String = "t2i"
+
+    @Flag(name: .long, help: "Disable streaming output")
+    var noStream: Bool = false
+
+    @MainActor
+    func run() async throws {
+        let core = MistralCore.shared
+
+        // Determine upsampling mode
+        let fluxMode: FluxConfig.Mode
+        switch mode.lowercased() {
+        case "t2i", "text2image", "text-to-image":
+            fluxMode = .upsamplingT2I
+            print("Mode: Text-to-Image upsampling")
+        case "i2i", "img2img", "image-to-image":
+            fluxMode = .upsamplingI2I
+            print("Mode: Image-to-Image upsampling")
+        default:
+            print("Error: Invalid mode '\(mode)'. Use 't2i' or 'i2i'")
+            return
+        }
+
+        // Load model
+        print("Loading model...")
+        if let path = modelOptions.modelPath {
+            try core.loadModel(from: path)
+        } else {
+            try await core.loadModel(
+                variant: modelOptions.variant,
+                hfToken: modelOptions.hfToken ?? ProcessInfo.processInfo.environment["HF_TOKEN"]
+            ) { progress, message in
+                print("\r\(message) (\(Int(progress * 100))%)", terminator: "")
+                fflush(stdout)
+            }
+            print()
+        }
+
+        // Build messages with appropriate system prompt
+        let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
+
+        print("\n--- Original Prompt ---")
+        print(prompt)
+        print("\n--- Enhanced Prompt ---\n")
+
+        // Generate enhanced prompt
+        let result = try core.chat(
+            messages: messages,
+            parameters: genOptions.parameters
+        ) { token in
+            if !noStream {
+                print(token, terminator: "")
+                fflush(stdout)
+            }
+            return true
+        }
+
+        if noStream {
+            print(result.text)
+        }
+
+        print("\n\n--- Stats ---")
+        print(result.summary())
     }
 }
 

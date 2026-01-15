@@ -31,8 +31,10 @@ struct ContentView: View {
                 Section("Tools") {
                     Label("Embeddings", systemImage: "cube.transparent")
                         .tag(3)
-                    Label("Models", systemImage: "square.stack.3d.down.right")
+                    Label("Upsampling", systemImage: "wand.and.stars")
                         .tag(4)
+                    Label("Models", systemImage: "square.stack.3d.down.right")
+                        .tag(5)
                 }
             }
             .listStyle(.sidebar)
@@ -59,6 +61,8 @@ struct ContentView: View {
                     case 3:
                         EmbeddingsView()
                     case 4:
+                        UpsamplingView()
+                    case 5:
                         ModelsManagementView()
                     default:
                         ChatView(viewModel: chatViewModel)
@@ -1090,6 +1094,127 @@ struct EmbeddingsView: View {
                 embeddingsInfo += "\n\n✅ Exported to: \(url.lastPathComponent)"
             } catch {
                 embeddingsInfo += "\n\n❌ Export failed: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+// MARK: - Upsampling View
+
+struct UpsamplingView: View {
+    @EnvironmentObject var modelManager: ModelManager
+    @State private var inputPrompt = ""
+    @State private var outputPrompt = ""
+    @State private var isProcessing = false
+    @State private var selectedMode: FluxConfig.Mode = .upsamplingT2I
+
+    var body: some View {
+        VStack(spacing: 16) {
+            // Mode selector
+            HStack {
+                Picker("Mode", selection: $selectedMode) {
+                    Text("Text-to-Image").tag(FluxConfig.Mode.upsamplingT2I)
+                    Text("Image-to-Image").tag(FluxConfig.Mode.upsamplingI2I)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 280)
+
+                Spacer()
+
+                Text(selectedMode == .upsamplingT2I ? "Enhance prompts" : "Edit instructions")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.purple.opacity(0.1))
+                    .cornerRadius(4)
+            }
+
+            // System prompt info
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("System Prompt")
+                        .font(.caption.bold())
+                    Text(FluxConfig.systemMessage(for: selectedMode).prefix(200) + "...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Input
+            GroupBox("Input Prompt") {
+                TextEditor(text: $inputPrompt)
+                    .font(.body)
+                    .frame(minHeight: 80)
+            }
+
+            // Action button
+            HStack {
+                Button(action: upsamplePrompt) {
+                    HStack {
+                        if isProcessing {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        }
+                        Text(isProcessing ? "Processing..." : "Upsample Prompt")
+                    }
+                }
+                .disabled(inputPrompt.isEmpty || isProcessing || !modelManager.isLoaded)
+
+                Spacer()
+
+                Button("Copy Output") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(outputPrompt, forType: .string)
+                }
+                .disabled(outputPrompt.isEmpty)
+            }
+
+            // Output
+            GroupBox("Enhanced Prompt") {
+                ScrollView {
+                    Text(outputPrompt.isEmpty ? "Enter a prompt and click Upsample to enhance it" : outputPrompt)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundColor(outputPrompt.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                }
+                .frame(minHeight: 150)
+            }
+
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func upsamplePrompt() {
+        isProcessing = true
+        outputPrompt = ""
+
+        Task {
+            do {
+                let messages = FluxConfig.buildMessages(prompt: inputPrompt, mode: selectedMode)
+
+                var result = ""
+                _ = try MistralCore.shared.chat(
+                    messages: messages,
+                    parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
+                ) { token in
+                    result += token
+                    return true
+                }
+
+                await MainActor.run {
+                    outputPrompt = result
+                    isProcessing = false
+                }
+            } catch {
+                await MainActor.run {
+                    outputPrompt = "Error: \(error.localizedDescription)"
+                    isProcessing = false
+                }
             }
         }
     }
