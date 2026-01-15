@@ -166,23 +166,28 @@ public class EmbeddingExtractor {
             padCount = 0
         }
 
-        MistralDebug.log("FLUX embeddings: padded from \(originalLength) to \(tokenIds.count) tokens")
+        MistralDebug.log("FLUX embeddings: padded from \(originalLength) to \(tokenIds.count) tokens (pad count: \(padCount))")
 
         // 5. Create input tensor
         let inputIds = MLXArray(tokenIds).reshaped([1, tokenIds.count])
 
-        // 6. Forward pass with hidden states
-        // Note: We don't use attention mask for padding because:
-        // - Python HuggingFace does use attention_mask but with specific handling
-        // - Without attention mask, we get cosine similarity ~0.994 which is acceptable
-        // - The padding token embeddings are consistent between Python and Swift
-        let output = model(inputIds, outputHiddenStates: true)
+        // 6. Create attention mask (1 for real tokens, 0 for padding)
+        // This matches HuggingFace attention_mask behavior for proper padding handling
+        var attentionMaskValues = Array(repeating: Int32(0), count: padCount)
+        attentionMaskValues.append(contentsOf: Array(repeating: Int32(1), count: originalLength))
+        let attentionMask = MLXArray(attentionMaskValues).reshaped([1, maxLength])
+
+        MistralDebug.log("FLUX embeddings: attention mask created with \(padCount) masked positions")
+
+        // 7. Forward pass with hidden states and attention mask
+        let output = model(inputIds, outputHiddenStates: true, attentionMask: attentionMask)
 
         guard let allHiddenStates = output.hiddenStates else {
             throw EmbeddingError.noHiddenStates
         }
 
         // 8. Extract hidden states from FLUX layers (10, 20, 30)
+        // Note: hidden_states includes embedding layer at index 0, so layer 10 is at index 10
         var extractedStates: [MLXArray] = []
         for layerIdx in FluxConfig.hiddenStateLayers {
             guard layerIdx >= 0 && layerIdx < allHiddenStates.count else {

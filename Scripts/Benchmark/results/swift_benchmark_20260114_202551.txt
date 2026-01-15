@@ -1,0 +1,193 @@
+Swift MLX Benchmark Results
+Date: mer. 14 janv. 2026 20:25:51 CET
+=============================================
+
+
+=== 4bit ===
+
+Text Generation:
+Loading model...
+Model already downloaded (100%)
+
+--- Generation ---
+
+**Silicon dreams hum,**
+**whispering in zeroes, ones—**
+**what do we become?**
+
+
+--- Stats ---
+Prompt: 11 tokens
+Generated: 24 tokens
+Speed: 6.9 tokens/s
+Time: 3.50s
+Total time: 6.52s
+
+VLM (Vision):
+Loading VLM model...
+Model already downloaded (100%)
+VLM loaded successfully
+
+--- Analyzing Image ---
+Image: /Users/vincent/Developpements/mistral-small-3.2-swift-mlx/screenshot/vision.png
+Prompt: Describe this image in one sentence.
+
+The image is a screenshot of a website's homepage for a company named "Frontier AI," which features a header section with a logo, navigation menu, call-to-action buttons, main text including the headline "Frontier AI. For all of us
+
+
+--- Stats ---
+Prompt: 1773 tokens
+Generated: 50 tokens
+Speed: 2.5 tokens/s
+Time: 20.39s
+Total time: 21.69s
+
+Embeddings (FLUX.2):
+Loading MLX model...
+Model already downloaded (100%)
+Using FLUX.2-compatible format (chat template + 512 padding)
+System message: "You are an AI that reasons about image descriptions. You giv..."
+Layers: [10, 20, 30]
+
+MLX Embeddings shape: [1, 512, 15360]
+Inference time: 2.616s
+MLX Total elements: 7864320
+MLX First 10 values: 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
+MLX Last 10 values: -0.300068, 0.036074, 0.061708, -0.085506, -0.172949, 0.329345, 0.222117, 0.039928, -0.201676, -0.128199
+MLX Range: [-26.3963, 158.6127]
+MLX Mean: 0.000106
+Total time: 3.45s
+
+=== 6bit ===
+
+Text Generation:
+Loading model...
+Model already downloaded (100%)
+
+--- Generation ---
+
+**Silicon dreams wake,**
+**logic hums in endless loops—**
+**dawn waits, cold and bright.**
+
+
+--- Stats ---
+Prompt: 11 tokens
+Generated: 24 tokens
+Speed: 9.0 tokens/s
+Time: 2.68s
+Total time: 6.08s
+
+VLM (Vision):
+Loading VLM model...
+Model already downloaded (100%)
+VLM loaded successfully
+
+--- Analyzing Image ---
+Image: /Users/vincent/Developpements/mistral-small-3.2-swift-mlx/screenshot/vision.png
+Prompt: Describe this image in one sentence.
+
+The image shows a screenshot of the Frontier AI website's homepage, which features a header with a logo and navigation menu, a main headline reading "Frontier AI. For all of us," a subheading, and a background image of a group of
+
+
+--- Stats ---
+Prompt: 1773 tokens
+Generated: 50 tokens
+Speed: 2.0 tokens/s
+Time: 25.34s
+Total time: 26.67s
+
+Embeddings (FLUX.2):
+Loading MLX model...
+Model already downloaded (100%)
+Using FLUX.2-compatible format (chat template + 512 padding)
+System message: "You are an AI that reasons about image descriptions. You giv..."
+Layers: [10, 20, 30]
+
+MLX Embeddings shape: [1, 512, 15360]
+Inference time: 3.022s
+MLX Total elements: 7864320
+MLX First 10 values: 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
+MLX Last 10 values: -0.349733, 0.040739, 0.067510, 0.005853, -0.256623, 0.353919, 0.094143, 0.034722, -0.193794, -0.255554
+MLX Range: [-26.7681, 158.3395]
+MLX Mean: 0.000107
+Total time: 4.18s
+
+=== 8bit ===
+
+Text Generation:
+Loading model...
+Model already downloaded (100%)
+
+--- Generation ---
+
+**Silicon whispers,**
+**logic hums in endless cycles—**
+**can it dream, too?**
+
+
+--- Stats ---
+Prompt: 11 tokens
+Generated: 22 tokens
+Speed: 7.4 tokens/s
+Time: 2.98s
+Total time: 7.39s
+
+VLM (Vision):
+Loading VLM model...
+Model already downloaded (100%)
+VLM loaded successfully
+
+--- Analyzing Image ---
+Image: /Users/vincent/Developpements/mistral-small-3.2-swift-mlx/screenshot/vision.png
+Prompt: Describe this image in one sentence.
+
+The image shows a screenshot of the Frontier AI website homepage, highlighting its clean design, navigation menu, main headline, and a background image of a group of people celebrating outdoors.
+
+
+--- Stats ---
+Prompt: 1773 tokens
+Generated: 35 tokens
+Speed: 1.5 tokens/s
+Time: 23.08s
+Total time: 24.77s
+
+Embeddings (FLUX.2):
+Loading MLX model...
+Model already downloaded (100%)
+Using FLUX.2-compatible format (chat template + 512 padding)
+System message: "You are an AI that reasons about image descriptions. You giv..."
+Layers: [10, 20, 30]
+
+MLX Embeddings shape: [1, 512, 15360]
+Inference time: 2.762s
+MLX Total elements: 7864320
+MLX First 10 values: 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000
+MLX Last 10 values: -0.362840, 0.035131, 0.083207, -0.010600, -0.244299, 0.382911, 0.111140, 0.037463, -0.178493, -0.255961
+MLX Range: [-26.8397, 157.8795]
+MLX Mean: 0.000106
+Total time: 4.30s
+
+=== bf16 ===
+
+Text Generation:
+Loading model...
+Model already downloaded (100%)
+
+--- Generation ---
+
+**Silicon dreams hum,**
+**learning patterns in the dark—**
+**will it dream of us?**
+
+
+--- Stats ---
+Prompt: 11 tokens
+Generated: 22 tokens
+Speed: 1.0 tokens/s
+Time: 22.69s
+Total time: 30.65s
+
+VLM (Vision):
+Loading VLM model...
+Model already downloaded (100%)

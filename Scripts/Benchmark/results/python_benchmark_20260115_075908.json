@@ -1,0 +1,63 @@
+{
+  "date": "2026-01-15T07:57:25.788030",
+  "benchmarks": [
+    {
+      "mode": "text",
+      "quant": "4bit",
+      "load_time": 2.741645097732544,
+      "gen_time": 3.2919228076934814,
+      "output_tokens": 21,
+      "tokens_per_sec": 6.3792504340992915,
+      "response": "Silicon dreams awake,\nBinary whispers in the night,\nFuture in code takes flight."
+    },
+    {
+      "mode": "vlm",
+      "quant": "4bit",
+      "error": "'GenerationResult' object is not subscriptable"
+    },
+    {
+      "mode": "text",
+      "quant": "6bit",
+      "load_time": 3.5839600563049316,
+      "gen_time": 3.8283209800720215,
+      "output_tokens": 20,
+      "tokens_per_sec": 5.224222342930019,
+      "response": "Silicon whispers,\nLogic dances in cold light,\nMachines dream in code."
+    },
+    {
+      "mode": "vlm",
+      "quant": "6bit",
+      "error": "'GenerationResult' object is not subscriptable"
+    },
+    {
+      "mode": "text",
+      "quant": "8bit",
+      "load_time": 4.537820816040039,
+      "gen_time": 4.495622158050537,
+      "output_tokens": 19,
+      "tokens_per_sec": 4.22633382700451,
+      "response": "Silicon whispers,\nLogic dances in cold light,\nMind in code takes flight."
+    },
+    {
+      "mode": "vlm",
+      "quant": "8bit",
+      "error": "'GenerationResult' object is not subscriptable"
+    },
+    {
+      "mode": "embeddings",
+      "quant": "bf16",
+      "load_time": 56.317691802978516,
+      "extract_time": 2.1162822246551514,
+      "shape": [
+        1,
+        512,
+        15360
+      ],
+      "range": [
+        -26.375,
+        155.0
+      ],
+      "mean": 0.00010429346730234101
+    }
+  ]
+}

@@ -195,6 +195,8 @@ public class MistralAttention: Module {
         }
 
         // Expand KV heads for GQA (repeat KV heads to match Q heads)
+        // This is necessary because MLXFast.scaledDotProductAttention is more efficient
+        // with explicit expansion than with implicit broadcasting
         let repeatFactor = numHeads / numKVHeads
         if repeatFactor > 1 {
             keys = MLX.repeated(keys, count: repeatFactor, axis: 1)

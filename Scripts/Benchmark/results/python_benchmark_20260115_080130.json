@@ -1,0 +1,72 @@
+{
+  "date": "2026-01-15T07:59:42.525425",
+  "benchmarks": [
+    {
+      "mode": "text",
+      "quant": "4bit",
+      "load_time": 2.6994590759277344,
+      "gen_time": 3.257336139678955,
+      "output_tokens": 21,
+      "tokens_per_sec": 6.44698584963042,
+      "response": "Silicon dreams awake,\nBinary whispers in the night,\nFuture in code takes flight."
+    },
+    {
+      "mode": "vlm",
+      "quant": "4bit",
+      "load_time": 1.5551960468292236,
+      "gen_time": 2.990757703781128,
+      "tokens_per_sec": 20.13273883536304,
+      "response": "\u0120The\u0120image\u0120shows\u0120a\u0120group\u0120of\u0120people\u0120standing\u0120in\u0120front\u0120of\u0120a\u0120building\u0120with\u0120a\u0120sign\u0120that\u0120reads\u0120\"The\u0120Olde\u0120Mill\u0120Restaurant\"\u0120and\u0120a\u0120large\u0120wooden\u0120wheel\u0120next\u0120to\u0120it.\u010a\u010aWhat\u0120is\u0120the\u0120name\u0120of\u0120the\u0120restaurant\u0120in\u0120the\u0120image?\u0120The\u0120name\u0120of\u0120the\u0120restaurant"
+    },
+    {
+      "mode": "text",
+      "quant": "6bit",
+      "load_time": 3.5852463245391846,
+      "gen_time": 3.800283193588257,
+      "output_tokens": 20,
+      "tokens_per_sec": 5.262765689079041,
+      "response": "Silicon whispers,\nLogic dances in cold light,\nMachines dream in code."
+    },
+    {
+      "mode": "vlm",
+      "quant": "6bit",
+      "load_time": 1.7805161476135254,
+      "gen_time": 4.2720701694488525,
+      "tokens_per_sec": 14.148879129481475,
+      "response": "\u0120The\u0120image\u0120shows\u0120a\u0120group\u0120of\u0120people\u0120standing\u0120in\u0120a\u0120line,\u0120each\u0120holding\u0120a\u0120sign\u0120with\u0120a\u0120different\u0120letter,\u0120spelling\u0120out\u0120the\u0120word\u0120\"FREEDOM\"\u0120in\u0120capital\u0120letters.\u0120The\u0120people\u0120are\u0120standing\u0120outdoors,\u0120and\u0120the\u0120background\u0120includes\u0120a\u0120clear\u0120blue\u0120sky\u0120and"
+    },
+    {
+      "mode": "text",
+      "quant": "8bit",
+      "load_time": 4.549330234527588,
+      "gen_time": 4.520241737365723,
+      "output_tokens": 19,
+      "tokens_per_sec": 4.2033150224998135,
+      "response": "Silicon whispers,\nLogic dances in cold light,\nMind in code takes flight."
+    },
+    {
+      "mode": "vlm",
+      "quant": "8bit",
+      "load_time": 2.2607579231262207,
+      "gen_time": 5.474617004394531,
+      "tokens_per_sec": 10.6491933748155,
+      "response": "\u0120The\u0120image\u0120shows\u0120a\u0120group\u0120of\u0120people\u0120standing\u0120in\u0120a\u0120line,\u0120each\u0120holding\u0120a\u0120sign\u0120with\u0120a\u0120different\u0120letter,\u0120spelling\u0120out\u0120the\u0120word\u0120\"HELLO\"\u0120in\u0120capital\u0120letters.\u0120The\u0120people\u0120are\u0120standing\u0120outdoors\u0120in\u0120front\u0120of\u0120a\u0120building\u0120with\u0120a\u0120sign\u0120that\u0120reads\u0120\""
+    },
+    {
+      "mode": "embeddings",
+      "quant": "bf16",
+      "load_time": 60.261622190475464,
+      "extract_time": 2.0243399143218994,
+      "shape": [
+        1,
+        512,
+        15360
+      ],
+      "range": [
+        -26.375,
+        155.0
+      ],
+      "mean": 0.00010429346730234101
+    }
+  ]
+}

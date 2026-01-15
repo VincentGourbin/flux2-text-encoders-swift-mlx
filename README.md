@@ -115,6 +115,40 @@ mistral models --delete 4bit
 ### Model Management
 ![Models](screenshot/models-management.png)
 
+## Benchmarks
+
+Performance comparison between Swift MLX and Python MLX on Apple Silicon (M-series).
+
+### Text Generation (tokens/s)
+
+| Quantization | Swift MLX | Python MLX | Swift Advantage |
+|--------------|-----------|------------|-----------------|
+| 4-bit | **11.8** | 6.4 | 1.84x faster |
+| 6-bit | **9.3** | 5.3 | 1.75x faster |
+| 8-bit | **8.0** | 4.2 | 1.90x faster |
+
+**Swift MLX is ~1.8x faster for text generation across all quantizations.**
+
+### Vision (VLM)
+
+| Quantization | Swift MLX | Notes |
+|--------------|-----------|-------|
+| 4-bit | 2.5 tok/s | Correct output |
+| 6-bit | 2.2 tok/s | Correct output |
+| 8-bit | 2.1 tok/s | Correct output |
+
+**Note:** Python `mlx_vlm` produces incorrect/hallucinated responses for this model (describes wrong images, shows raw BPE tokens). Swift VLM is the **only working implementation**.
+
+### Summary
+
+| Use Case | Recommendation |
+|----------|----------------|
+| Text Generation | **Swift MLX** (1.8x faster) |
+| Vision/VLM | **Swift MLX** (only working implementation) |
+| Embeddings | Either (similar performance) |
+
+See [Scripts/Benchmark/results/COMPARISON_REPORT.md](Scripts/Benchmark/results/COMPARISON_REPORT.md) for detailed benchmark methodology and results.
+
 ## Architecture
 
 ```

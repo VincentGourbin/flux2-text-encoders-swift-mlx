@@ -189,22 +189,25 @@ public class ImageProcessor {
 
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
-        // Convert RGBA UInt8 to RGB Float using vDSP (vectorized, ~10x faster than loops)
+        // Convert RGBA UInt8 to RGB Float using vDSP (vectorized SIMD operations)
         var floatPixels = [Float](repeating: 0, count: pixelCount * 3)
 
-        // Extract R, G, B channels separately using stride operations
-        // Input: RGBARGBA... (stride 4), Output: RGBRGB... (packed RGB)
+        // Use vDSP_vfltu8 for vectorized UInt8->Float conversion with stride
+        // Input: RGBARGBA... (stride 4), Output: RGBRGB... (stride 3)
         pixelData.withUnsafeBufferPointer { srcBuffer in
             floatPixels.withUnsafeMutableBufferPointer { dstBuffer in
-                // Convert UInt8 to Float for each channel
+                let srcBase = srcBuffer.baseAddress!
+                let dstBase = dstBuffer.baseAddress!
+                let n = vDSP_Length(pixelCount)
+
                 // R channel: src[0, 4, 8, ...] -> dst[0, 3, 6, ...]
+                vDSP_vfltu8(srcBase, 4, dstBase, 3, n)
+
                 // G channel: src[1, 5, 9, ...] -> dst[1, 4, 7, ...]
+                vDSP_vfltu8(srcBase + 1, 4, dstBase + 1, 3, n)
+
                 // B channel: src[2, 6, 10, ...] -> dst[2, 5, 8, ...]
-                for channel in 0..<3 {
-                    for i in 0..<pixelCount {
-                        dstBuffer[i * 3 + channel] = Float(srcBuffer[i * 4 + channel])
-                    }
-                }
+                vDSP_vfltu8(srcBase + 2, 4, dstBase + 2, 3, n)
             }
         }
 

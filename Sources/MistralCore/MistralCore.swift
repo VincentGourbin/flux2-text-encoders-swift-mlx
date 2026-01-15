@@ -28,6 +28,14 @@ public final class MistralCore: @unchecked Sendable {
     private var extractor: EmbeddingExtractor?
     private var imageProcessor: ImageProcessor?
 
+    /// CoreML encoder for ANE-accelerated FLUX.2 embeddings
+    @available(macOS 14.0, *)
+    private var coremlEncoder: MistralCoreMLEncoder?
+
+    /// Chunked CoreML encoder for ANE-accelerated FLUX.2 embeddings (for large models)
+    @available(macOS 14.0, *)
+    private var coremlChunkedEncoder: MistralCoreMLChunkedEncoder?
+
     /// Whether VLM (vision) model is loaded
     public var isVLMLoaded: Bool {
         return vlmModel != nil && tokenizer != nil && imageProcessor != nil
@@ -121,6 +129,9 @@ public final class MistralCore: @unchecked Sendable {
         generator = nil
         extractor = nil
         imageProcessor = nil
+        if #available(macOS 14.0, *) {
+            coremlEncoder = nil
+        }
         MLX.GPU.clearCache()
         MistralDebug.log("Model unloaded")
     }
@@ -441,15 +452,252 @@ public final class MistralCore: @unchecked Sendable {
     }
 
     /// Export embeddings to file
+    /// This is a standalone operation that doesn't require the full model to be loaded
     public func exportEmbeddings(
         _ embeddings: MLXArray,
         to path: String,
         format: ExportFormat = .binary
     ) throws {
-        guard let extractor = extractor else {
+        // Standalone export - doesn't require extractor or full model
+        switch format {
+        case .binary:
+            // Export as raw float32 binary
+            let flatEmbeddings = embeddings.reshaped([-1]).asArray(Float.self)
+            let data = flatEmbeddings.withUnsafeBufferPointer { buffer in
+                Data(buffer: buffer)
+            }
+            try data.write(to: URL(fileURLWithPath: path))
+
+        case .numpy:
+            // For .npy format, use MLX's save function
+            try MLX.save(array: embeddings, url: URL(fileURLWithPath: path))
+
+        case .json:
+            // Export as JSON with shape and values
+            let shape = embeddings.shape
+            let flatEmbeddings = embeddings.reshaped([-1]).asArray(Float.self)
+            let dict: [String: Any] = [
+                "shape": shape.map { $0 },
+                "values": flatEmbeddings
+            ]
+            let jsonData = try JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted)
+            try jsonData.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    // MARK: - CoreML (ANE-accelerated)
+
+    /// Whether the CoreML encoder is loaded
+    @available(macOS 14.0, *)
+    public var isCoreMLLoaded: Bool {
+        coremlEncoder?.isLoaded ?? false
+    }
+
+    /// Load CoreML encoder for ANE-accelerated FLUX.2 embeddings extraction
+    ///
+    /// The CoreML model runs on Apple Neural Engine for faster inference.
+    /// It must be generated separately using the Python conversion scripts.
+    ///
+    /// - Parameter url: URL to the .mlpackage file (or nil to load from bundle)
+    @available(macOS 14.0, *)
+    public func loadCoreMLEncoder(from url: URL? = nil) throws {
+        let encoder = MistralCoreMLEncoder()
+
+        if let url = url {
+            try encoder.load(from: url)
+        } else {
+            try encoder.loadFromBundle()
+        }
+
+        coremlEncoder = encoder
+        MistralDebug.log("CoreML encoder loaded successfully")
+    }
+
+    /// Load CoreML encoder from a path string
+    @available(macOS 14.0, *)
+    public func loadCoreMLEncoder(fromPath path: String) throws {
+        try loadCoreMLEncoder(from: URL(fileURLWithPath: path))
+    }
+
+    /// Unload CoreML encoder to free memory
+    @available(macOS 14.0, *)
+    public func unloadCoreMLEncoder() {
+        coremlEncoder = nil
+        MistralDebug.log("CoreML encoder unloaded")
+    }
+
+    /// Extract FLUX.2-compatible embeddings using CoreML (ANE)
+    ///
+    /// This method uses the CoreML encoder running on Apple Neural Engine
+    /// for faster inference compared to the MLX-based extraction.
+    ///
+    /// - Parameter prompt: User prompt text
+    /// - Returns: Embeddings tensor with shape [1, 512, 15360]
+    @available(macOS 14.0, *)
+    public func extractFluxEmbeddingsCoreML(prompt: String) throws -> MLXArray {
+        guard let encoder = coremlEncoder, encoder.isLoaded else {
+            throw MistralCoreError.invalidInput(
+                "CoreML encoder not loaded. Call loadCoreMLEncoder() first."
+            )
+        }
+
+        guard let tokenizer = tokenizer else {
             throw MistralCoreError.modelNotLoaded
         }
-        try extractor.exportEmbeddings(embeddings, to: path, format: format)
+
+        return try encoder.extractFluxEmbeddings(prompt: prompt, tokenizer: tokenizer)
+    }
+
+    /// Extract FLUX.2 embeddings using CoreML with timing information
+    ///
+    /// - Parameter prompt: User prompt text
+    /// - Returns: Tuple of (embeddings, inferenceTimeSeconds)
+    @available(macOS 14.0, *)
+    public func extractFluxEmbeddingsCoreMLTimed(prompt: String) throws -> (MLXArray, TimeInterval) {
+        guard let encoder = coremlEncoder, encoder.isLoaded else {
+            throw MistralCoreError.invalidInput(
+                "CoreML encoder not loaded. Call loadCoreMLEncoder() first."
+            )
+        }
+
+        guard let tokenizer = tokenizer else {
+            throw MistralCoreError.modelNotLoaded
+        }
+
+        let tokens = tokenizer.encode(prompt, addSpecialTokens: true)
+        let tokenIds = tokens.map { Int32($0) }
+
+        return try encoder.extractEmbeddingsWithTiming(tokenIds: tokenIds)
+    }
+
+    // MARK: - CoreML Chunked Encoder (for large models)
+
+    /// Whether the chunked CoreML encoder is loaded
+    @available(macOS 14.0, *)
+    public var isCoreMLChunkedLoaded: Bool {
+        coremlChunkedEncoder?.isLoaded ?? false
+    }
+
+    /// Load chunked CoreML encoder for ANE-accelerated FLUX.2 embeddings
+    ///
+    /// The chunked encoder splits the model into 3 parts to work around CoreML
+    /// limitations with large models. Each chunk runs on ANE sequentially.
+    ///
+    /// - Parameter directoryURL: Directory containing MistralChunk1/2/3.mlpackage files
+    @available(macOS 14.0, *)
+    public func loadCoreMLChunkedEncoder(from directoryURL: URL) throws {
+        let encoder = MistralCoreMLChunkedEncoder()
+        try encoder.loadChunks(from: directoryURL)
+        coremlChunkedEncoder = encoder
+        MistralDebug.log("CoreML chunked encoder loaded successfully (3 chunks)")
+    }
+
+    /// Load chunked CoreML encoder from path string
+    @available(macOS 14.0, *)
+    public func loadCoreMLChunkedEncoder(fromPath path: String) throws {
+        try loadCoreMLChunkedEncoder(from: URL(fileURLWithPath: path))
+    }
+
+    /// Load chunked CoreML encoder with individual chunk paths
+    @available(macOS 14.0, *)
+    public func loadCoreMLChunkedEncoder(
+        chunk1Path: String,
+        chunk2Path: String,
+        chunk3Path: String
+    ) throws {
+        let encoder = MistralCoreMLChunkedEncoder()
+        try encoder.loadChunks(
+            chunk1Path: chunk1Path,
+            chunk2Path: chunk2Path,
+            chunk3Path: chunk3Path
+        )
+        coremlChunkedEncoder = encoder
+        MistralDebug.log("CoreML chunked encoder loaded successfully (3 chunks)")
+    }
+
+    /// Unload chunked CoreML encoder to free memory
+    @available(macOS 14.0, *)
+    public func unloadCoreMLChunkedEncoder() {
+        coremlChunkedEncoder = nil
+        MistralDebug.log("CoreML chunked encoder unloaded")
+    }
+
+    /// Load only the tokenizer without loading the full model
+    /// Useful for CoreML-only mode where we need tokenization but not MLX inference
+    ///
+    /// - Parameter modelPath: Path to model directory containing tekken.json
+    public func loadTokenizerOnly(from modelPath: String) {
+        tokenizer = TekkenTokenizer(modelPath: modelPath)
+        MistralDebug.log("Tokenizer loaded from \(modelPath)")
+    }
+
+    /// Extract FLUX.2-compatible embeddings using chunked CoreML (ANE)
+    ///
+    /// - Parameter prompt: User prompt text
+    /// - Returns: Embeddings tensor with shape [1, 512, 15360]
+    @available(macOS 14.0, *)
+    public func extractFluxEmbeddingsCoreMLChunked(prompt: String) throws -> MLXArray {
+        guard let encoder = coremlChunkedEncoder, encoder.isLoaded else {
+            throw MistralCoreError.invalidInput(
+                "CoreML chunked encoder not loaded. Call loadCoreMLChunkedEncoder() first."
+            )
+        }
+
+        guard let tokenizer = tokenizer else {
+            throw MistralCoreError.modelNotLoaded
+        }
+
+        return try encoder.extractFluxEmbeddings(prompt: prompt, tokenizer: tokenizer)
+    }
+
+    /// Extract FLUX.2 embeddings using chunked CoreML with timing
+    ///
+    /// - Parameter prompt: User prompt text
+    /// - Returns: Tuple of (embeddings, inferenceTimeSeconds)
+    @available(macOS 14.0, *)
+    public func extractFluxEmbeddingsCoreMLChunkedTimed(prompt: String) throws -> (MLXArray, TimeInterval) {
+        guard let encoder = coremlChunkedEncoder, encoder.isLoaded else {
+            throw MistralCoreError.invalidInput(
+                "CoreML chunked encoder not loaded. Call loadCoreMLChunkedEncoder() first."
+            )
+        }
+
+        guard let tokenizer = tokenizer else {
+            throw MistralCoreError.modelNotLoaded
+        }
+
+        let tokens = tokenizer.encode(prompt, addSpecialTokens: true)
+        let tokenIds = tokens.map { Int32($0) }
+
+        return try encoder.extractEmbeddingsWithTiming(tokenIds: tokenIds)
+    }
+
+    /// Extract FLUX.2 embeddings with detailed per-chunk timing
+    ///
+    /// - Parameter prompt: User prompt text
+    /// - Returns: Tuple with embeddings and timing for each chunk
+    @available(macOS 14.0, *)
+    public func extractFluxEmbeddingsCoreMLChunkedDetailedTiming(prompt: String) throws -> (
+        embeddings: MLXArray,
+        chunk1Time: TimeInterval,
+        chunk2Time: TimeInterval,
+        chunk3Time: TimeInterval,
+        totalTime: TimeInterval
+    ) {
+        guard let encoder = coremlChunkedEncoder, encoder.isLoaded else {
+            throw MistralCoreError.invalidInput(
+                "CoreML chunked encoder not loaded. Call loadCoreMLChunkedEncoder() first."
+            )
+        }
+
+        guard let tokenizer = tokenizer else {
+            throw MistralCoreError.modelNotLoaded
+        }
+
+        let tokens = tokenizer.encode(prompt, addSpecialTokens: true)
+        let tokenIds = tokens.map { Int32($0) }
+
+        return try encoder.extractEmbeddingsWithDetailedTiming(tokenIds: tokenIds)
     }
 
     // MARK: - Tokenization
