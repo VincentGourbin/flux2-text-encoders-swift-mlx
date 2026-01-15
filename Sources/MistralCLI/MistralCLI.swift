@@ -279,59 +279,11 @@ struct Embed: AsyncParsableCommand {
     @Flag(name: .long, help: "Show token IDs (for debugging)")
     var showTokens: Bool = false
 
-    @Flag(name: .long, help: "Use CoreML chunked encoder instead of MLX (requires --coreml-path)")
-    var coreml: Bool = false
-
-    @Option(name: .long, help: "Path to CoreML chunks directory (containing MistralChunk1/2/3.mlpackage)")
-    var coremlPath: String?
-
-    @Option(name: .long, help: "Path to tokenizer directory (for CoreML mode, defaults to --model-path)")
-    var tokenizerPath: String?
-
-    @Flag(name: .long, help: "Compare MLX and CoreML embeddings (for validation)")
-    var compare: Bool = false
-
     @MainActor
     func run() async throws {
         let core = MistralCore.shared
 
-        // CoreML-only mode (no MLX model needed)
-        if coreml && !compare {
-            guard let coremlPathStr = coremlPath else {
-                print("Error: --coreml-path is required when using --coreml")
-                return
-            }
-
-            // Load tokenizer (required for encoding prompts)
-            let tokenizerDir = tokenizerPath ?? modelOptions.modelPath ?? "/Users/vincent/Library/Caches/models/mistralai/Mistral-Small-3.2-24B-Instruct-2506"
-            print("Loading tokenizer from \(tokenizerDir)...")
-            core.loadTokenizerOnly(from: tokenizerDir)
-
-            print("Loading CoreML chunked encoder...")
-            if #available(macOS 14.0, *) {
-                try core.loadCoreMLChunkedEncoder(fromPath: coremlPathStr)
-                print("CoreML chunks loaded")
-
-                let startTime = Date()
-                let embeddings = try core.extractFluxEmbeddingsCoreMLChunked(prompt: text)
-                let elapsedTime = Date().timeIntervalSince(startTime)
-
-                print("\nCoreML Embeddings shape: \(embeddings.shape)")
-                print("Inference time: \(String(format: "%.3f", elapsedTime))s")
-
-                printEmbeddingsSummary(embeddings, label: "CoreML")
-
-                if let outputPath = output {
-                    try core.exportEmbeddings(embeddings, to: outputPath, format: .binary)
-                    print("Saved to: \(outputPath)")
-                }
-            } else {
-                print("Error: CoreML requires macOS 14.0+")
-            }
-            return
-        }
-
-        // Load MLX model (needed for flux, compare, or standard mode)
+        // Load MLX model
         print("Loading MLX model...")
         if let path = modelOptions.modelPath {
             try core.loadModel(from: path)
@@ -344,52 +296,6 @@ struct Embed: AsyncParsableCommand {
                 fflush(stdout)
             }
             print()
-        }
-
-        // Comparison mode: MLX vs CoreML
-        if compare {
-            guard let coremlPathStr = coremlPath else {
-                print("Error: --coreml-path is required when using --compare")
-                return
-            }
-
-            if #available(macOS 14.0, *) {
-                print("\n=== Embeddings Comparison Mode ===\n")
-
-                // Extract with MLX
-                print("Extracting with MLX...")
-                let mlxStart = Date()
-                let mlxEmbeddings = try core.extractFluxEmbeddings(prompt: text)
-                let mlxTime = Date().timeIntervalSince(mlxStart)
-                print("MLX shape: \(mlxEmbeddings.shape)")
-                print("MLX time: \(String(format: "%.3f", mlxTime))s")
-
-                // Load and extract with CoreML
-                print("\nLoading CoreML chunks...")
-                try core.loadCoreMLChunkedEncoder(fromPath: coremlPathStr)
-
-                print("Extracting with CoreML...")
-                let coremlStart = Date()
-                let coremlEmbeddings = try core.extractFluxEmbeddingsCoreMLChunked(prompt: text)
-                let coremlTime = Date().timeIntervalSince(coremlStart)
-                print("CoreML shape: \(coremlEmbeddings.shape)")
-                print("CoreML time: \(String(format: "%.3f", coremlTime))s")
-
-                // Compare embeddings
-                print("\n=== Comparison Results ===")
-                compareEmbeddings(mlx: mlxEmbeddings, coreml: coremlEmbeddings)
-
-                // Save if requested
-                if let outputPath = output {
-                    let basePath = outputPath.replacingOccurrences(of: ".bin", with: "")
-                    try core.exportEmbeddings(mlxEmbeddings, to: "\(basePath)_mlx.bin", format: .binary)
-                    try core.exportEmbeddings(coremlEmbeddings, to: "\(basePath)_coreml.bin", format: .binary)
-                    print("\nSaved to: \(basePath)_mlx.bin and \(basePath)_coreml.bin")
-                }
-            } else {
-                print("Error: CoreML requires macOS 14.0+")
-            }
-            return
         }
 
         // FLUX.2-compatible format (matches Python mflux-gradio exactly)
@@ -494,59 +400,6 @@ struct Embed: AsyncParsableCommand {
         let mean = allValues.reduce(0, +) / Float(allValues.count)
         print("\(label) Range: [\(String(format: "%.4f", minVal)), \(String(format: "%.4f", maxVal))]")
         print("\(label) Mean: \(String(format: "%.6f", mean))")
-    }
-
-    private func compareEmbeddings(mlx: MLXArray, coreml: MLXArray) {
-        // Flatten for comparison
-        let mlxFlat = mlx.reshaped([-1]).asArray(Float.self)
-        let coremlFlat = coreml.reshaped([-1]).asArray(Float.self)
-
-        guard mlxFlat.count == coremlFlat.count else {
-            print("Shape mismatch: MLX has \(mlxFlat.count) elements, CoreML has \(coremlFlat.count)")
-            return
-        }
-
-        // Compute difference metrics
-        var maxDiff: Float = 0
-        var sumDiff: Float = 0
-        var sumSqDiff: Float = 0
-
-        for i in 0..<mlxFlat.count {
-            let diff = abs(mlxFlat[i] - coremlFlat[i])
-            maxDiff = max(maxDiff, diff)
-            sumDiff += diff
-            sumSqDiff += diff * diff
-        }
-
-        let meanDiff = sumDiff / Float(mlxFlat.count)
-        let rmsDiff = sqrt(sumSqDiff / Float(mlxFlat.count))
-
-        // Cosine similarity
-        var dotProduct: Float = 0
-        var normA: Float = 0
-        var normB: Float = 0
-
-        for i in 0..<mlxFlat.count {
-            dotProduct += mlxFlat[i] * coremlFlat[i]
-            normA += mlxFlat[i] * mlxFlat[i]
-            normB += coremlFlat[i] * coremlFlat[i]
-        }
-
-        let cosineSim = dotProduct / (sqrt(normA) * sqrt(normB))
-
-        print("Max absolute difference: \(String(format: "%.8f", maxDiff))")
-        print("Mean absolute difference: \(String(format: "%.8f", meanDiff))")
-        print("RMS difference: \(String(format: "%.8f", rmsDiff))")
-        print("Cosine similarity: \(String(format: "%.8f", cosineSim))")
-
-        // Verdict
-        if maxDiff < 1e-4 && cosineSim > 0.9999 {
-            print("\n[PASS] Embeddings are effectively identical!")
-        } else if cosineSim > 0.99 {
-            print("\n[WARN] Embeddings are very similar but not identical")
-        } else {
-            print("\n[FAIL] Embeddings differ significantly!")
-        }
     }
 }
 

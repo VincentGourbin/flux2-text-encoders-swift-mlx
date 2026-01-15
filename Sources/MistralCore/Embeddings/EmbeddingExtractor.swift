@@ -13,8 +13,38 @@ import MLXNN
 /// These must match exactly with mflux-gradio Python implementation
 public enum FluxConfig {
     /// System message used for text encoding (matches HuggingFace/mflux-gradio)
+    /// Used for extracting embeddings from image descriptions
     public static let systemMessage = """
 You are an AI that reasons about image descriptions. You give structured responses focusing on object relationships, object attribution and actions without speculation.
+"""
+
+    /// System message for Text-to-Image prompt upsampling (official BFL)
+    /// Rewrites user prompts to be more descriptive for better image generation
+    public static let systemMessageUpsamplingT2I = """
+You are an expert prompt engineer for FLUX.2 by Black Forest Labs. Rewrite user prompts to be more descriptive while strictly preserving their core subject and intent.
+
+Guidelines:
+1. Structure: Keep structured inputs structured (enhance within fields). Convert natural language to detailed paragraphs.
+2. Details: Add concrete visual specifics - form, scale, textures, materials, lighting (quality, direction, color), shadows, spatial relationships, and environmental context.
+3. Text in Images: Put ALL text in quotation marks, matching the prompt's language. Always provide explicit quoted text for objects that would contain text in reality (signs, labels, screens, etc.) - without it, the model generates gibberish.
+
+Output only the revised prompt and nothing else.
+"""
+
+    /// System message for Image-to-Image editing (official BFL)
+    /// Converts editing requests into concise instructions
+    public static let systemMessageUpsamplingI2I = """
+You are FLUX.2 by Black Forest Labs, an image-editing expert. You convert editing requests into one concise instruction (50-80 words, ~30 for brief requests).
+
+Rules:
+- Single instruction only, no commentary
+- Use clear, analytical language (avoid "whimsical," "cascading," etc.)
+- Specify what changes AND what stays the same (face, lighting, composition)
+- Reference actual image elements
+- Turn negatives into positives ("don't change X" → "keep X")
+- Make abstractions concrete ("futuristic" → "glowing cyan neon, metallic panels")
+
+Output only the final instruction in plain text and nothing else.
 """
 
     /// Maximum sequence length for padding
@@ -22,6 +52,40 @@ You are an AI that reasons about image descriptions. You give structured respons
 
     /// Hidden state layers to extract (produces 3 * 5120 = 15360 dimensions)
     public static let hiddenStateLayers = [10, 20, 30]
+
+    /// FLUX.2 operation modes
+    public enum Mode {
+        /// Extract embeddings for image generation conditioning
+        case embeddings
+        /// Upsample/enhance text-to-image prompts
+        case upsamplingT2I
+        /// Convert image editing requests to instructions
+        case upsamplingI2I
+    }
+
+    /// Get the system message for a given FLUX mode
+    public static func systemMessage(for mode: Mode) -> String {
+        switch mode {
+        case .embeddings:
+            return systemMessage
+        case .upsamplingT2I:
+            return systemMessageUpsamplingT2I
+        case .upsamplingI2I:
+            return systemMessageUpsamplingI2I
+        }
+    }
+
+    /// Build chat messages for a given FLUX mode
+    /// - Parameters:
+    ///   - prompt: User prompt
+    ///   - mode: FLUX operation mode
+    /// - Returns: Messages array ready for chat template
+    public static func buildMessages(prompt: String, mode: Mode) -> [[String: String]] {
+        return [
+            ["role": "system", "content": systemMessage(for: mode)],
+            ["role": "user", "content": prompt]
+        ]
+    }
 }
 
 // MARK: - Embedding Extractor
