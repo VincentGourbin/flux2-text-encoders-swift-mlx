@@ -440,6 +440,104 @@ public final class MistralCore: @unchecked Sendable {
         return extractor.getFluxTokenIds(prompt: prompt, maxLength: maxLength)
     }
 
+    /// Extract FLUX.2-compatible embeddings with image (for Image-to-Image)
+    /// This method produces embeddings that include both image and text features
+    /// - Parameters:
+    ///   - image: NSImage to include in embeddings
+    ///   - prompt: User prompt text (editing instruction)
+    /// - Returns: Embeddings tensor with shape [1, seq, 15360] where seq depends on image size
+    #if canImport(AppKit)
+    public func extractFluxEmbeddingsWithImage(
+        image: NSImage,
+        prompt: String
+    ) throws -> MLXArray {
+        guard let vlm = vlmModel,
+              let tokenizer = tokenizer,
+              let processor = imageProcessor else {
+            throw MistralCoreError.vlmNotLoaded
+        }
+
+        let debug = ProcessInfo.processInfo.environment["VLM_DEBUG"] != nil
+
+        if debug { print("[FLUX I2I] Starting with prompt: \(prompt)"); fflush(stdout) }
+
+        // 1. Preprocess image with FLUX-specific max size (768² as per BFL reference)
+        // This limits the number of image tokens to a reasonable amount
+        let pixelValues = try processor.preprocess(image, maxSize: FluxConfig.maxImageSizeUpsampling)
+
+        // 2. Get number of image tokens from the projector output
+        // Image tokens = (H/patch_size/merge_size) * (W/patch_size/merge_size)
+        let numImageTokens = vlm.getNumImageTokens(
+            imageHeight: pixelValues.shape[1],
+            imageWidth: pixelValues.shape[2]
+        )
+
+        if debug { print("[FLUX I2I] Image will generate \(numImageTokens) tokens"); fflush(stdout) }
+
+        // 3. Build input tokens with I2I system message
+        // Format: <s> [INST] <<SYS>>\n{system}\n<</SYS>>\n\n[IMG]...[IMG] {prompt} [/INST]
+        let imageTokenId = vlm.config.imageTokenIndex
+
+        // Build messages for I2I mode
+        let cleanedPrompt = prompt.replacingOccurrences(of: "[IMG]", with: "")
+        let systemMessage = FluxConfig.systemMessageUpsamplingI2I
+
+        // Encode system message part
+        var inputTokens: [Int] = []
+        inputTokens.append(tokenizer.bosToken)  // <s>
+        inputTokens.append(3)  // [INST]
+        inputTokens.append(contentsOf: tokenizer.encode("<<SYS>>\n\(systemMessage)\n<</SYS>>\n\n", addSpecialTokens: false))
+
+        // Add ALL image tokens - do NOT truncate!
+        // The image features and token positions MUST match
+        inputTokens.append(contentsOf: Array(repeating: imageTokenId, count: numImageTokens))
+
+        // Add prompt
+        inputTokens.append(contentsOf: tokenizer.encode("\n\(cleanedPrompt) ", addSpecialTokens: false))
+        inputTokens.append(4)  // [/INST]
+
+        // Note: For I2I, we do NOT truncate or pad to a fixed length
+        // The sequence length depends on the image size and must include all image tokens
+        // FLUX.2 diffusion model handles variable-length conditioning
+
+        if debug { print("[FLUX I2I] Total sequence length: \(inputTokens.count) tokens (image: \(numImageTokens))"); fflush(stdout) }
+
+        // 4. Create input tensor
+        let inputIds = MLXArray(inputTokens.map { Int32($0) }).expandedDimensions(axis: 0)
+
+        // 5. Extract embeddings using VLM
+        let embeddings = vlm.extractFluxEmbeddingsWithImage(
+            pixelValues: pixelValues,
+            inputIds: inputIds
+        )
+
+        if debug { print("[FLUX I2I] Embeddings shape: \(embeddings.shape)"); fflush(stdout) }
+
+        return embeddings
+    }
+    #endif
+
+    /// Extract FLUX.2-compatible embeddings with image from path (for Image-to-Image)
+    /// - Parameters:
+    ///   - imagePath: Path to image file
+    ///   - prompt: User prompt text (editing instruction)
+    /// - Returns: Embeddings tensor with shape [1, seq, 15360] where seq depends on image size
+    public func extractFluxEmbeddingsWithImage(
+        imagePath: String,
+        prompt: String
+    ) throws -> MLXArray {
+        #if canImport(AppKit)
+        guard let processor = imageProcessor else {
+            throw MistralCoreError.vlmNotLoaded
+        }
+
+        let image = try processor.loadImage(from: imagePath)
+        return try extractFluxEmbeddingsWithImage(image: image, prompt: prompt)
+        #else
+        throw MistralCoreError.vlmNotLoaded
+        #endif
+    }
+
     /// Export embeddings to file
     /// This is a standalone operation that doesn't require the full model to be loaded
     public func exportEmbeddings(

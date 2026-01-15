@@ -55,10 +55,19 @@ public class ImageProcessor {
     /// - Parameter image: Input NSImage
     /// - Returns: MLXArray with shape [1, H, W, 3] (NHWC format for MLX Conv2d)
     public func preprocess(_ image: NSImage) throws -> MLXArray {
+        return try preprocess(image, maxSize: config.imageSize)
+    }
+
+    /// Preprocess an image for the vision encoder with custom max size
+    /// - Parameters:
+    ///   - image: Input NSImage
+    ///   - maxSize: Maximum size for longest edge (overrides config.imageSize)
+    /// - Returns: MLXArray with shape [1, H, W, 3] (NHWC format for MLX Conv2d)
+    public func preprocess(_ image: NSImage, maxSize: Int) throws -> MLXArray {
         // Use autoreleasepool to free CoreGraphics memory immediately
         let (pixels, width, height): ([Float], Int, Int) = try autoreleasepool {
             // 1. Resize image maintaining aspect ratio
-            let resizedImage = try resizeImage(image, longestEdge: config.imageSize)
+            let resizedImage = try resizeImage(image, longestEdge: maxSize)
 
             // 2. Get pixel data as Float array
             return try extractPixels(resizedImage)

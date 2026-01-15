@@ -997,16 +997,14 @@ struct FluxToolsView: View {
 
                 Spacer()
 
-                if selectedMode == .embeddings {
-                    Button("Export...") { exportEmbeddings() }
-                        .disabled(lastEmbeddings == nil)
-                } else {
-                    Button("Copy") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(outputText, forType: .string)
-                    }
-                    .disabled(outputText.isEmpty)
+                Button("Copy Text") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(outputText, forType: .string)
                 }
+                .disabled(outputText.isEmpty)
+
+                Button("Export Embeddings...") { exportEmbeddings() }
+                    .disabled(lastEmbeddings == nil)
             }
 
             // Output
@@ -1033,7 +1031,7 @@ struct FluxToolsView: View {
     private var actionButtonTitle: String {
         switch selectedMode {
         case .embeddings: return "Extract Embeddings"
-        case .upsamplingT2I, .upsamplingI2I: return "Upsample Prompt"
+        case .upsamplingT2I, .upsamplingI2I: return "Upsample & Extract"
         }
     }
 
@@ -1090,18 +1088,62 @@ struct FluxToolsView: View {
                 case .upsamplingT2I, .upsamplingI2I:
                     let fluxMode: FluxConfig.Mode = selectedMode == .upsamplingT2I ? .upsamplingT2I : .upsamplingI2I
                     let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
+                    let hasImage = selectedMode == .upsamplingI2I && imagePath != nil
 
-                    var result = ""
+                    // Step 1: Generate enhanced prompt
+                    await MainActor.run {
+                        outputText = "Generating enhanced prompt..."
+                    }
+
+                    var enhancedPrompt = ""
                     _ = try MistralCore.shared.chat(
                         messages: messages,
                         parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
                     ) { token in
-                        result += token
+                        enhancedPrompt += token
                         return true
                     }
 
+                    // Step 2: Extract embeddings
                     await MainActor.run {
-                        outputText = result
+                        if hasImage {
+                            outputText = "Enhanced prompt:\n\(enhancedPrompt)\n\nExtracting embeddings with image..."
+                        } else {
+                            outputText = "Enhanced prompt:\n\(enhancedPrompt)\n\nExtracting embeddings..."
+                        }
+                    }
+
+                    let embeddings: MLXArray
+                    let embeddingType: String
+
+                    if hasImage, let path = imagePath {
+                        // I2I with image: extract embeddings including image tokens
+                        embeddings = try MistralCore.shared.extractFluxEmbeddingsWithImage(
+                            imagePath: path,
+                            prompt: enhancedPrompt
+                        )
+                        embeddingType = "Image + Text"
+                    } else {
+                        // T2I or I2I without image: text-only embeddings
+                        embeddings = try MistralCore.shared.extractFluxEmbeddings(prompt: enhancedPrompt)
+                        embeddingType = "Text only"
+                    }
+
+                    await MainActor.run {
+                        lastEmbeddings = embeddings
+                        let flatEmbeddings = embeddings.reshaped([-1])
+                        let firstValues = flatEmbeddings[0..<min(5, flatEmbeddings.size)].asArray(Float.self)
+
+                        outputText = """
+                        === Enhanced Prompt ===
+                        \(enhancedPrompt)
+
+                        === FLUX.2 Embeddings (\(embeddingType)) ===
+                        Shape: \(embeddings.shape)
+                        First values: \(firstValues.map { String(format: "%.4f", $0) }.joined(separator: ", "))...
+
+                        ✅ Ready to export for FLUX.2 diffusion
+                        """
                         isProcessing = false
                     }
                 }

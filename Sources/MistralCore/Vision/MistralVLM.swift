@@ -357,6 +357,99 @@ public class MistralVLM: Module {
         return languageModel.lm_head(h)
     }
 
+    /// Forward from embeddings with hidden states collection
+    /// - Parameters:
+    ///   - hiddenStates: Input embeddings [batch, seq, hidden]
+    ///   - layerIndices: Which layer indices to collect hidden states from
+    /// - Returns: Dictionary mapping layer index to hidden states
+    public func forwardWithHiddenStates(
+        _ inputEmbeddings: MLXArray,
+        layerIndices: [Int]
+    ) -> [Int: MLXArray] {
+        var h = inputEmbeddings
+        var collectedStates: [Int: MLXArray] = [:]
+
+        // Create causal mask
+        let seqLen = h.shape[1]
+        let mask = createCausalMask(seqLen: seqLen, offset: 0)
+
+        // Convert negative indices to positive
+        let numLayers = languageModel.model.layers.count
+        let resolvedIndices = Set(layerIndices.map { idx -> Int in
+            if idx < 0 { return numLayers + idx }
+            return idx
+        })
+
+        // Collect embedding layer output (index 0)
+        if resolvedIndices.contains(0) {
+            collectedStates[0] = h
+        }
+
+        // Pass through transformer layers
+        for (i, layer) in languageModel.model.layers.enumerated() {
+            h = layer(h, mask: mask, cache: nil)
+
+            // Collect after layer i (layer index is i+1 because 0 is embedding)
+            let stateIdx = i + 1
+            if resolvedIndices.contains(stateIdx) {
+                collectedStates[stateIdx] = h
+            }
+        }
+
+        return collectedStates
+    }
+
+    /// Extract FLUX.2-compatible embeddings from image + text
+    /// This method produces embeddings that include both image and text features
+    /// - Parameters:
+    ///   - pixelValues: Preprocessed image [batch, H, W, 3]
+    ///   - inputIds: Token IDs with image token placeholders
+    /// - Returns: Embeddings tensor with shape [1, seq, 15360]
+    public func extractFluxEmbeddingsWithImage(
+        pixelValues: MLXArray,
+        inputIds: MLXArray
+    ) -> MLXArray {
+        // 1. Encode image
+        let (imageEmbeddings, _, _) = encodeImage(pixelValues)
+
+        // 2. Get text embeddings
+        let textEmbeddings = languageModel.model.embed_tokens(inputIds)
+
+        // 3. Merge image and text embeddings
+        let mergedEmbeddings = mergeEmbeddings(
+            textEmbeddings: textEmbeddings,
+            imageEmbeddings: imageEmbeddings,
+            inputIds: inputIds
+        )
+
+        // 4. Forward through transformer with hidden states collection
+        // FLUX.2 uses layers 10, 20, 30
+        let layerIndices = [10, 20, 30]
+        let hiddenStates = forwardWithHiddenStates(mergedEmbeddings, layerIndices: layerIndices)
+
+        // 5. Concatenate hidden states from specified layers
+        var extractedStates: [MLXArray] = []
+        for idx in layerIndices {
+            guard let layerHidden = hiddenStates[idx] else {
+                fatalError("Missing hidden state for layer \(idx)")
+            }
+            extractedStates.append(layerHidden)
+        }
+
+        // 6. Concatenate along hidden dimension: [1, seq, 5120] x 3 -> [1, seq, 15360]
+        let embeddings = concatenated(extractedStates, axis: -1)
+
+        // 7. Evaluate to ensure computation is complete
+        eval(embeddings)
+
+        if vlmDebug {
+            print("[VLM] FLUX I2I embeddings: shape \(embeddings.shape)")
+            fflush(stdout)
+        }
+
+        return embeddings
+    }
+
     private func createCausalMask(seqLen: Int, offset: Int) -> MLXArray? {
         if seqLen == 1 {
             return nil

@@ -420,6 +420,12 @@ struct Upsample: AsyncParsableCommand {
     @Option(name: .shortAndLong, help: "Mode: t2i (text-to-image) or i2i (image-to-image)")
     var mode: String = "t2i"
 
+    @Option(name: .shortAndLong, help: "Reference image path (for i2i mode, embeddings will include image tokens)")
+    var image: String?
+
+    @Option(name: .shortAndLong, help: "Output file for embeddings (optional, .bin or .npy)")
+    var output: String?
+
     @Flag(name: .long, help: "Disable streaming output")
     var noStream: Bool = false
 
@@ -436,24 +442,44 @@ struct Upsample: AsyncParsableCommand {
         case "i2i", "img2img", "image-to-image":
             fluxMode = .upsamplingI2I
             print("Mode: Image-to-Image upsampling")
+            if image != nil {
+                print("Reference image will be included in embeddings")
+            }
         default:
             print("Error: Invalid mode '\(mode)'. Use 't2i' or 'i2i'")
             return
         }
 
-        // Load model
+        // Load model (VLM if we have an image, otherwise text-only)
         print("Loading model...")
-        if let path = modelOptions.modelPath {
-            try core.loadModel(from: path)
-        } else {
-            try await core.loadModel(
-                variant: modelOptions.variant,
-                hfToken: modelOptions.hfToken ?? ProcessInfo.processInfo.environment["HF_TOKEN"]
-            ) { progress, message in
-                print("\r\(message) (\(Int(progress * 100))%)", terminator: "")
-                fflush(stdout)
+        if image != nil {
+            // Need VLM for image embedding
+            if let path = modelOptions.modelPath {
+                try core.loadVLMModel(from: path)
+            } else {
+                try await core.loadVLMModel(
+                    variant: modelOptions.variant,
+                    hfToken: modelOptions.hfToken ?? ProcessInfo.processInfo.environment["HF_TOKEN"]
+                ) { progress, message in
+                    print("\r\(message) (\(Int(progress * 100))%)", terminator: "")
+                    fflush(stdout)
+                }
+                print()
             }
-            print()
+        } else {
+            // Text-only model is sufficient
+            if let path = modelOptions.modelPath {
+                try core.loadModel(from: path)
+            } else {
+                try await core.loadModel(
+                    variant: modelOptions.variant,
+                    hfToken: modelOptions.hfToken ?? ProcessInfo.processInfo.environment["HF_TOKEN"]
+                ) { progress, message in
+                    print("\r\(message) (\(Int(progress * 100))%)", terminator: "")
+                    fflush(stdout)
+                }
+                print()
+            }
         }
 
         // Build messages with appropriate system prompt
@@ -481,6 +507,41 @@ struct Upsample: AsyncParsableCommand {
 
         print("\n\n--- Stats ---")
         print(result.summary())
+
+        // Extract and export embeddings if output specified
+        if let outputPath = output {
+            print("\n--- Extracting Embeddings ---")
+
+            let embeddings: MLXArray
+            if let imagePath = image, fluxMode == .upsamplingI2I {
+                // I2I with image: extract embeddings including image tokens
+                print("Extracting embeddings with image...")
+                embeddings = try core.extractFluxEmbeddingsWithImage(
+                    imagePath: imagePath,
+                    prompt: result.text  // Use the enhanced prompt
+                )
+            } else {
+                // T2I or I2I without image: text-only embeddings
+                print("Extracting text embeddings...")
+                embeddings = try core.extractFluxEmbeddings(
+                    prompt: result.text  // Use the enhanced prompt
+                )
+            }
+
+            // Determine format from extension
+            let format: ExportFormat
+            if outputPath.hasSuffix(".npy") {
+                format = .numpy
+            } else if outputPath.hasSuffix(".json") {
+                format = .json
+            } else {
+                format = .binary
+            }
+
+            try core.exportEmbeddings(embeddings, to: outputPath, format: format)
+            print("Embeddings exported to: \(outputPath)")
+            print("Shape: \(embeddings.shape)")
+        }
     }
 }
 

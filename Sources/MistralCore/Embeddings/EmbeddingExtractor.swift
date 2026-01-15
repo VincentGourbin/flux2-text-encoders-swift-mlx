@@ -47,8 +47,14 @@ Rules:
 Output only the final instruction in plain text and nothing else.
 """
 
-    /// Maximum sequence length for padding
+    /// Maximum sequence length for padding (text-only embeddings)
     public static let maxSequenceLength = 512
+
+    /// Maximum image size for I2I upsampling (768² as per BFL reference)
+    public static let maxImageSizeUpsampling = 768
+
+    /// Maximum image size for reference images (512² as per BFL reference)
+    public static let maxImageSizeReference = 512
 
     /// Hidden state layers to extract (produces 3 * 5120 = 15360 dimensions)
     public static let hiddenStateLayers = [10, 20, 30]
