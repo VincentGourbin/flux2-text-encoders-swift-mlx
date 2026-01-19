@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "MistralSwift",
+    name: "FluxTextEncoders",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "MistralCore", targets: ["MistralCore"]),
-        .executable(name: "MistralCLI", targets: ["MistralCLI"]),
-        .executable(name: "MistralApp", targets: ["MistralApp"]),
+        .library(name: "FluxTextEncoders", targets: ["FluxTextEncoders"]),
+        .executable(name: "FluxEncodersCLI", targets: ["FluxEncodersCLI"]),
+        .executable(name: "FluxEncodersApp", targets: ["FluxEncodersApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.21.0"),
@@ -16,7 +16,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "MistralCore",
+            name: "FluxTextEncoders",
             dependencies: [
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
@@ -25,22 +25,22 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "MistralCLI",
+            name: "FluxEncodersCLI",
             dependencies: [
-                "MistralCore",
+                "FluxTextEncoders",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
         .executableTarget(
-            name: "MistralApp",
+            name: "FluxEncodersApp",
             dependencies: [
-                "MistralCore",
+                "FluxTextEncoders",
             ],
             exclude: ["Resources/Info.plist"]
         ),
         .testTarget(
-            name: "MistralCoreTests",
-            dependencies: ["MistralCore"]
+            name: "FluxTextEncodersTests",
+            dependencies: ["FluxTextEncoders"]
         ),
     ]
 )

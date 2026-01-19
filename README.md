@@ -1,17 +1,28 @@
-# Mistral Small 3.2 Swift MLX
+# FLUX.2 Text Encoders - Swift MLX
 
-Native Swift implementation of Mistral Small 3.2 (24B parameters) for Apple Silicon using the MLX framework.
-Includes text-only and Vision-Language Model (VLM) capabilities.
+Native Swift implementation of text encoders for FLUX.2 image generation on Apple Silicon using the MLX framework.
+Supports both **Mistral Small 3.2** (for FLUX.2 dev) and **Qwen3** (for FLUX.2 Klein).
 
 ## Features
 
+- **Mistral Small 3.2 (24B)** - Text encoder for FLUX.2 dev/pro
+- **Qwen3 (4B/8B)** - Text encoder for FLUX.2 Klein
 - **Text Generation** - Streaming text generation with configurable parameters
 - **Interactive Chat** - Multi-turn conversation with chat template support
-- **Vision Analysis** - Image understanding via Pixtral vision encoder (VLM)
+- **Vision Analysis** - Image understanding via Pixtral vision encoder (Mistral VLM)
 - **FLUX.2 Embeddings** - Extract embeddings compatible with FLUX.2 image generation
+- **Klein Embeddings** - Extract embeddings for FLUX.2 Klein (Qwen3-based)
 - **Native macOS App** - Full-featured SwiftUI application
 - **CLI Tool** - Complete command-line interface
 - **Model Management** - Automatic download and caching from HuggingFace
+
+## FLUX.2 Model Compatibility
+
+| FLUX.2 Model | Text Encoder | Embedding Layers | Output Dimension |
+|--------------|--------------|------------------|------------------|
+| dev / pro | Mistral Small 3.2 | [10, 20, 30] | 15,360 |
+| Klein 4B | Qwen3 4B | [9, 18, 27] | 7,680 |
+| Klein 9B | Qwen3 8B | [9, 18, 27] | 12,288 |
 
 ## Requirements
 
@@ -28,7 +39,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/VincentGourbin/mistral-small-3.2-swift-mlx.git", from: "1.0.0")
+    .package(url: "https://github.com/VincentGourbin/flux2-text-encoders-swift-mlx.git", from: "1.0.0")
 ]
 ```
 
@@ -41,7 +52,7 @@ swift build -c release
 ### Build macOS App
 
 ```bash
-swift build -c release --product MistralApp
+swift build -c release --product FluxEncodersApp
 ```
 
 ## Usage
@@ -49,57 +60,98 @@ swift build -c release --product MistralApp
 ### Library API
 
 ```swift
-import MistralCore
+import FluxTextEncoders
 
-// Load model
-try await MistralCore.shared.loadModel(variant: .mlx8bit)
+// === Mistral (FLUX.2 dev) ===
+
+// Load Mistral model
+try await FluxTextEncoders.shared.loadModel(variant: .mlx8bit)
 
 // Generate text
-let result = try MistralCore.shared.generate(prompt: "Hello") { token in
+let result = try FluxTextEncoders.shared.generate(prompt: "Hello") { token in
     print(token, terminator: "")
     return true
 }
 
 // Chat
 let messages = [["role": "user", "content": "Hello!"]]
-let response = try MistralCore.shared.chat(messages: messages)
+let response = try FluxTextEncoders.shared.chat(messages: messages)
+
+// FLUX.2 dev Embeddings
+let embeddings = try FluxTextEncoders.shared.extractFluxEmbeddings(prompt: "A cat")
+// Shape: [1, 512, 15360]
 
 // Vision (VLM)
-try await MistralCore.shared.loadVLMModel(variant: .mlx4bit)
-let analysis = try MistralCore.shared.analyzeImage(path: "photo.jpg", prompt: "Describe this")
+try await FluxTextEncoders.shared.loadVLMModel(variant: .mlx4bit)
+let analysis = try FluxTextEncoders.shared.analyzeImage(path: "photo.jpg", prompt: "Describe this")
 
-// FLUX.2 Embeddings
-let embeddings = try MistralCore.shared.extractFluxEmbeddings(prompt: "A cat")
+// === Qwen3 (FLUX.2 Klein) ===
+
+// Load Qwen3 model
+try await FluxTextEncoders.shared.loadQwen3Model(variant: .qwen3_4B_8bit)
+
+// Chat with Qwen3
+let qwenResult = try FluxTextEncoders.shared.chatQwen3(
+    messages: [["role": "user", "content": "Hello!"]],
+    parameters: GenerateParameters(maxTokens: 500)
+)
+
+// FLUX.2 Klein Embeddings
+let kleinEmbeddings = try FluxTextEncoders.shared.extractKleinEmbeddings(
+    prompt: "A sunset over mountains",
+    config: .klein4B
+)
+// Shape: [1, 512, 7680] for Klein 4B
 ```
 
 ### CLI Commands
 
 ```bash
-# Chat mode (default)
-mistral chat
+# Chat mode (default - Mistral)
+flux-encoders chat
+
+# Chat with Qwen3
+flux-encoders chat --qwen3
 
 # Text generation
-mistral generate "Your prompt here" --temperature 0.7
+flux-encoders generate "Your prompt here" --temperature 0.7
 
-# Vision analysis
-mistral vision image.jpg "What's in this image?"
+# Vision analysis (Mistral VLM)
+flux-encoders vision image.jpg "What's in this image?"
 
-# Extract embeddings
-mistral embed "Your text" --flux --output embeddings.bin
+# Extract FLUX.2 dev embeddings (Mistral)
+flux-encoders embed "Your text" --flux --output embeddings.bin
+
+# Extract FLUX.2 Klein embeddings (Qwen3)
+flux-encoders embed "Your text" --klein 4b --output klein_embeddings.bin
+
+# Upsampling (enhance prompts using Qwen3)
+flux-encoders upsample "A cat" --style photographic
 
 # Manage models
-mistral models
-mistral models --download 8bit
-mistral models --delete 4bit
+flux-encoders models
+flux-encoders models --download mistral-8bit
+flux-encoders models --download qwen3-4b-8bit
 ```
 
 ## Model Variants
+
+### Mistral Small 3.2 (FLUX.2 dev)
 
 | Variant | Size | RAM Required | Speed |
 |---------|------|--------------|-------|
 | BF16 | ~48GB | 64GB+ | Baseline |
 | 8-bit | ~24GB | 32GB | ~Same |
 | 4-bit | ~12GB | 16GB | Slightly slower |
+
+### Qwen3 (FLUX.2 Klein)
+
+| Model | Variant | Size | RAM Required |
+|-------|---------|------|--------------|
+| Qwen3 4B | 8-bit | ~4GB | 8GB |
+| Qwen3 4B | 4-bit | ~2GB | 6GB |
+| Qwen3 8B | 8-bit | ~8GB | 12GB |
+| Qwen3 8B | 4-bit | ~4GB | 8GB |
 
 ## Screenshots
 
@@ -153,13 +205,15 @@ See [Scripts/Benchmark/results/COMPARISON_REPORT.md](Scripts/Benchmark/results/C
 
 ```
 Sources/
-├── MistralCore/      # Core library
-│   ├── Model/        # Mistral transformer
-│   ├── Vision/       # Pixtral vision encoder
-│   ├── Tokenizer/    # Tekken tokenizer
-│   └── Embeddings/   # FLUX.2 extraction
-├── MistralCLI/       # Command-line tool
-└── MistralApp/       # SwiftUI macOS app
+├── FluxTextEncoders/    # Core library
+│   ├── Model/           # Mistral transformer
+│   │   └── Qwen3/       # Qwen3 transformer
+│   ├── Vision/          # Pixtral vision encoder
+│   ├── Tokenizer/       # Tekken tokenizer
+│   ├── Embeddings/      # FLUX.2 & Klein extraction
+│   └── Generation/      # Text generation (Mistral & Qwen3)
+├── FluxEncodersCLI/     # Command-line tool
+└── FluxEncodersApp/     # SwiftUI macOS app
 ```
 
 ## API Documentation
