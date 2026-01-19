@@ -75,7 +75,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle("Mistral Small 3.2")
+        .navigationTitle("FLUX.2 Text Encoders")
     }
 }
 
