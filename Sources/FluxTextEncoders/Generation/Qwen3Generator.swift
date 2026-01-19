@@ -65,7 +65,7 @@ public final class Qwen3Generator: @unchecked Sendable {
         var logits = model.forward(inputIds, cache: cache)
         eval(logits)
 
-        // Generation loop
+        // Generation loop - optimized with async eval pipeline
         var generatedTokens: [Int] = []
         let hasCallback = onToken != nil
 
@@ -73,21 +73,18 @@ public final class Qwen3Generator: @unchecked Sendable {
         var pendingTokens: [Int] = []
         let streamBatchSize = 10
 
+        // Sample first token (lazy)
+        var nextTokenArray = sampleNextToken(
+            logits: logits,
+            temperature: parameters.temperature,
+            topP: parameters.topP
+        )
+
         for i in 0..<parameters.maxTokens {
-            let lastLogits = logits[0, -1]
+            // Kick off async eval for current token (GPU starts computing)
+            MLX.asyncEval(nextTokenArray)
 
-            let nextTokenArray: MLXArray
-            if parameters.temperature == 0 {
-                nextTokenArray = argMax(lastLogits)
-            } else {
-                nextTokenArray = sampleTopPGPU(
-                    lastLogits,
-                    temperature: parameters.temperature,
-                    topP: parameters.topP
-                )
-            }
-
-            eval(nextTokenArray)
+            // Now sync to get the token value
             let nextToken = Int(nextTokenArray.item(Int32.self))
 
             // Check for EOS tokens
@@ -109,8 +106,16 @@ public final class Qwen3Generator: @unchecked Sendable {
                 }
             }
 
+            // Forward pass for next token
             inputIds = MLXArray([Int32(nextToken)]).reshaped([1, 1])
             logits = model.forward(inputIds, cache: cache)
+
+            // Sample next token (lazy - will be async eval'd at start of next iteration)
+            nextTokenArray = sampleNextToken(
+                logits: logits,
+                temperature: parameters.temperature,
+                topP: parameters.topP
+            )
 
             // Periodically clear GPU cache
             if (i + 1) % 20 == 0 {
@@ -180,28 +185,25 @@ public final class Qwen3Generator: @unchecked Sendable {
         var logits = model.forward(inputIds, cache: cache)
         eval(logits)
 
-        // Generation loop
+        // Generation loop - optimized with async eval pipeline
         var generatedTokens: [Int] = []
         let hasCallback = onToken != nil
 
         var pendingTokens: [Int] = []
         let streamBatchSize = 10
 
+        // Sample first token (lazy)
+        var nextTokenArray = sampleNextToken(
+            logits: logits,
+            temperature: parameters.temperature,
+            topP: parameters.topP
+        )
+
         for i in 0..<parameters.maxTokens {
-            let lastLogits = logits[0, -1]
+            // Kick off async eval for current token
+            MLX.asyncEval(nextTokenArray)
 
-            let nextTokenArray: MLXArray
-            if parameters.temperature == 0 {
-                nextTokenArray = argMax(lastLogits)
-            } else {
-                nextTokenArray = sampleTopPGPU(
-                    lastLogits,
-                    temperature: parameters.temperature,
-                    topP: parameters.topP
-                )
-            }
-
-            eval(nextTokenArray)
+            // Sync to get the token value
             let nextToken = Int(nextTokenArray.item(Int32.self))
 
             if nextToken == eosTokenId || nextToken == padTokenId {
@@ -221,8 +223,16 @@ public final class Qwen3Generator: @unchecked Sendable {
                 }
             }
 
+            // Forward pass for next token
             inputIds = MLXArray([Int32(nextToken)]).reshaped([1, 1])
             logits = model.forward(inputIds, cache: cache)
+
+            // Sample next token (lazy)
+            nextTokenArray = sampleNextToken(
+                logits: logits,
+                temperature: parameters.temperature,
+                topP: parameters.topP
+            )
 
             if (i + 1) % 20 == 0 {
                 GPU.clearCache()
@@ -286,6 +296,17 @@ public final class Qwen3Generator: @unchecked Sendable {
     }
 
     // MARK: - Private Helpers
+
+    /// Sample next token from logits (returns lazy MLXArray for async eval)
+    private func sampleNextToken(logits: MLXArray, temperature: Float, topP: Float) -> MLXArray {
+        let lastLogits = logits[0, -1]
+
+        if temperature == 0 {
+            return argMax(lastLogits)
+        } else {
+            return sampleTopPGPU(lastLogits, temperature: temperature, topP: topP)
+        }
+    }
 
     /// Format a single user message using Qwen3 chat template
     /// - Parameters:

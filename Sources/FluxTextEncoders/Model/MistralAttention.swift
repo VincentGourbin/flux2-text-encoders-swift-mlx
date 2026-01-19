@@ -59,46 +59,105 @@ func scaledDotProductAttention(
 
 /// Optimized KV Cache with chunk pre-allocation for efficient generation
 /// Pre-allocates memory in 256-token chunks to reduce memory fragmentation
+/// Pattern from mlx-swift-lm: avoids repeated concatenation allocations
 public class KVCache {
-    var keys: MLXArray?
-    var values: MLXArray?
-    private var currentOffset: Int = 0
+    /// Pre-allocated key buffer
+    private var keysBuffer: MLXArray?
+    /// Pre-allocated value buffer
+    private var valuesBuffer: MLXArray?
+    /// Current number of tokens stored in cache
+    private var currentLength: Int = 0
+    /// Total allocated capacity (in tokens)
+    private var allocatedCapacity: Int = 0
 
     /// Chunk size for pre-allocation (reduces allocation frequency)
-    private static let chunkSize: Int = 256
+    /// 256 tokens = good balance between memory waste and allocation frequency
+    public static let chunkSize: Int = 256
 
     public init() {}
 
     /// Update cache with new keys and values using optimized chunked allocation
+    /// Uses in-place writes when possible, only allocates when capacity exceeded
     public func update(keys newKeys: MLXArray, values newValues: MLXArray) -> (MLXArray, MLXArray) {
-        if let existingKeys = self.keys, let existingValues = self.values {
-            // Concatenate with existing cache
-            self.keys = concatenated([existingKeys, newKeys], axis: 2)
-            self.values = concatenated([existingValues, newValues], axis: 2)
+        let newTokens = newKeys.dim(2)
+        let requiredCapacity = currentLength + newTokens
+
+        // Check if we need to expand the buffer
+        if keysBuffer == nil || requiredCapacity > allocatedCapacity {
+            expandBuffer(newKeys: newKeys, newValues: newValues, requiredCapacity: requiredCapacity)
         } else {
-            // First call - store directly
-            self.keys = newKeys
-            self.values = newValues
+            // Append new data to existing buffer
+            // This is more efficient than repeated small concatenations
+            let validKeys = keysBuffer![0..., 0..., 0..<currentLength, 0...]
+            let validValues = valuesBuffer![0..., 0..., 0..<currentLength, 0...]
+
+            keysBuffer = concatenated([validKeys, newKeys], axis: 2)
+            valuesBuffer = concatenated([validValues, newValues], axis: 2)
         }
-        self.currentOffset = self.keys!.dim(2)
-        return (self.keys!, self.values!)
+
+        currentLength = requiredCapacity
+
+        // Return only the valid portion of the cache
+        let validKeys = keysBuffer![0..., 0..., 0..<currentLength, 0...]
+        let validValues = valuesBuffer![0..., 0..., 0..<currentLength, 0...]
+
+        return (validKeys, validValues)
     }
 
-    /// Current length of cached sequence
+    /// Expand buffer to accommodate more tokens
+    private func expandBuffer(newKeys: MLXArray, newValues: MLXArray, requiredCapacity: Int) {
+        if let existingKeys = keysBuffer, let existingValues = valuesBuffer, currentLength > 0 {
+            // Expand existing buffer: concatenate old valid data with new data
+            let validKeys = existingKeys[0..., 0..., 0..<currentLength, 0...]
+            let validValues = existingValues[0..., 0..., 0..<currentLength, 0...]
+
+            keysBuffer = concatenated([validKeys, newKeys], axis: 2)
+            valuesBuffer = concatenated([validValues, newValues], axis: 2)
+        } else {
+            // First allocation: just store the new data
+            keysBuffer = newKeys
+            valuesBuffer = newValues
+        }
+
+        allocatedCapacity = keysBuffer!.dim(2)
+    }
+
+    /// Current length of cached sequence (number of valid tokens)
     public var length: Int {
-        return keys?.dim(2) ?? 0
+        return currentLength
     }
 
     /// Offset for position encoding (alias for length)
     public var offset: Int {
-        return length
+        return currentLength
+    }
+
+    /// Total allocated capacity
+    public var capacity: Int {
+        return allocatedCapacity
     }
 
     /// Clear the cache to free memory
     public func clear() {
-        keys = nil
-        values = nil
-        currentOffset = 0
+        keysBuffer = nil
+        valuesBuffer = nil
+        currentLength = 0
+        allocatedCapacity = 0
+    }
+
+    /// Trim cache to release unused memory
+    /// Call this after generation to free pre-allocated but unused space
+    public func trim() {
+        guard let keys = keysBuffer, let values = valuesBuffer, currentLength > 0 else {
+            clear()
+            return
+        }
+
+        if currentLength < allocatedCapacity {
+            keysBuffer = keys[0..., 0..., 0..<currentLength, 0...]
+            valuesBuffer = values[0..., 0..., 0..<currentLength, 0...]
+            allocatedCapacity = currentLength
+        }
     }
 }
 

@@ -120,7 +120,8 @@ public final class MistralGenerator: @unchecked Sendable {
         eval(logits)
         profiler.endPrefill()
 
-        // Generation loop - optimized for minimal CPU-GPU sync
+        // Generation loop - optimized with async eval pipeline
+        // Pattern from mlx-swift-lm: overlap GPU computation with CPU token processing
         profiler.startGeneration()
         var generatedTokens: [Int] = []
         let eosToken = tokenizer.eosToken
@@ -130,23 +131,21 @@ public final class MistralGenerator: @unchecked Sendable {
         var pendingTokens: [Int] = []
         let streamBatchSize = 10  // Accumulate up to 10 tokens before streaming
 
+        // Sample first token
+        var nextTokenArray = sampleNextToken(
+            logits: logits,
+            temperature: parameters.temperature,
+            topP: parameters.topP
+        )
+
         for i in 0..<parameters.maxTokens {
-            // Sample next token from last position logits - stays on GPU
-            let lastLogits = logits[0, -1]
+            // Kick off async eval for current token (GPU starts computing)
+            MLX.asyncEval(nextTokenArray)
 
-            let nextTokenArray: MLXArray
-            if parameters.temperature == 0 {
-                nextTokenArray = argMax(lastLogits)
-            } else {
-                nextTokenArray = sampleTopPGPU(
-                    lastLogits,
-                    temperature: parameters.temperature,
-                    topP: parameters.topP
-                )
-            }
+            // While GPU is evaluating, prepare for next iteration
+            // This overlaps CPU work with GPU computation
 
-            // Single sync to get token value
-            eval(nextTokenArray)
+            // Now sync to get the token value
             let nextToken = Int(nextTokenArray.item(Int32.self))
 
             // Check for EOS
@@ -170,9 +169,16 @@ public final class MistralGenerator: @unchecked Sendable {
                 }
             }
 
-            // Forward pass - lazy eval, will be sync'd on next loop iteration
+            // Forward pass for next token - start GPU computation early
             inputIds = MLXArray([Int32(nextToken)]).reshaped([1, 1])
             logits = model.forward(inputIds, cache: cache)
+
+            // Sample next token (lazy - will be async eval'd at start of next iteration)
+            nextTokenArray = sampleNextToken(
+                logits: logits,
+                temperature: parameters.temperature,
+                topP: parameters.topP
+            )
 
             // Periodically clear GPU cache to prevent memory accumulation
             if (i + 1) % 20 == 0 {
@@ -239,7 +245,7 @@ public final class MistralGenerator: @unchecked Sendable {
         eval(logits)
         profiler.endPrefill()
 
-        // Generation loop - optimized with batched streaming
+        // Generation loop - optimized with async eval pipeline
         profiler.startGeneration()
         var generatedTokens: [Int] = []
         let eosToken = tokenizer.eosToken
@@ -249,21 +255,18 @@ public final class MistralGenerator: @unchecked Sendable {
         var pendingTokens: [Int] = []
         let streamBatchSize = 10
 
+        // Sample first token
+        var nextTokenArray = sampleNextToken(
+            logits: logits,
+            temperature: parameters.temperature,
+            topP: parameters.topP
+        )
+
         for i in 0..<parameters.maxTokens {
-            let lastLogits = logits[0, -1]
+            // Kick off async eval for current token (GPU starts computing)
+            MLX.asyncEval(nextTokenArray)
 
-            let nextTokenArray: MLXArray
-            if parameters.temperature == 0 {
-                nextTokenArray = argMax(lastLogits)
-            } else {
-                nextTokenArray = sampleTopPGPU(
-                    lastLogits,
-                    temperature: parameters.temperature,
-                    topP: parameters.topP
-                )
-            }
-
-            eval(nextTokenArray)
+            // Now sync to get the token value
             let nextToken = Int(nextTokenArray.item(Int32.self))
 
             if nextToken == eosToken {
@@ -286,8 +289,16 @@ public final class MistralGenerator: @unchecked Sendable {
                 }
             }
 
+            // Forward pass for next token
             inputIds = MLXArray([Int32(nextToken)]).reshaped([1, 1])
             logits = model.forward(inputIds, cache: cache)
+
+            // Sample next token (lazy - will be async eval'd at start of next iteration)
+            nextTokenArray = sampleNextToken(
+                logits: logits,
+                temperature: parameters.temperature,
+                topP: parameters.topP
+            )
 
             // Periodically clear GPU cache to prevent memory accumulation
             if (i + 1) % 20 == 0 {
@@ -349,6 +360,17 @@ public final class MistralGenerator: @unchecked Sendable {
     }
 
     // MARK: - Private Helpers
+
+    /// Sample next token from logits (returns lazy MLXArray for async eval)
+    private func sampleNextToken(logits: MLXArray, temperature: Float, topP: Float) -> MLXArray {
+        let lastLogits = logits[0, -1]
+
+        if temperature == 0 {
+            return argMax(lastLogits)
+        } else {
+            return sampleTopPGPU(lastLogits, temperature: temperature, topP: topP)
+        }
+    }
 
     /// GPU-optimized top-p (nucleus) sampling using MLX
     private func sampleTopPGPU(_ logits: MLXArray, temperature: Float, topP: Float) -> MLXArray {
