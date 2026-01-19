@@ -57,37 +57,88 @@ func scaledDotProductAttention(
     return matmul(weights, values)
 }
 
+/// Quantization configuration for KV cache
+public struct KVCacheQuantizationConfig {
+    /// Number of bits for quantization (4 or 8)
+    public let bits: Int
+    /// Group size for quantization
+    public let groupSize: Int
+    /// Threshold in tokens after which to quantize the cache
+    public let quantizeThreshold: Int
+
+    /// 8-bit quantization (less aggressive, better quality)
+    public static let bits8 = KVCacheQuantizationConfig(bits: 8, groupSize: 64, quantizeThreshold: 1024)
+
+    /// 4-bit quantization (more aggressive, 75% memory reduction)
+    public static let bits4 = KVCacheQuantizationConfig(bits: 4, groupSize: 64, quantizeThreshold: 2048)
+
+    /// No quantization (default)
+    public static let none = KVCacheQuantizationConfig(bits: 0, groupSize: 0, quantizeThreshold: Int.max)
+
+    public init(bits: Int, groupSize: Int, quantizeThreshold: Int) {
+        self.bits = bits
+        self.groupSize = groupSize
+        self.quantizeThreshold = quantizeThreshold
+    }
+}
+
 /// Optimized KV Cache with chunk pre-allocation for efficient generation
 /// Pre-allocates memory in 256-token chunks to reduce memory fragmentation
 /// Pattern from mlx-swift-lm: avoids repeated concatenation allocations
+/// Supports optional quantization for long sequences (>1K tokens)
 public class KVCache {
-    /// Pre-allocated key buffer
+    /// Pre-allocated key buffer (full precision or dequantized)
     private var keysBuffer: MLXArray?
-    /// Pre-allocated value buffer
+    /// Pre-allocated value buffer (full precision or dequantized)
     private var valuesBuffer: MLXArray?
     /// Current number of tokens stored in cache
     private var currentLength: Int = 0
     /// Total allocated capacity (in tokens)
     private var allocatedCapacity: Int = 0
 
+    // MARK: - Quantization State
+
+    /// Quantized keys storage
+    private var quantizedKeys: MLXArray?
+    private var keysScales: MLXArray?
+    private var keysBiases: MLXArray?
+
+    /// Quantized values storage
+    private var quantizedValues: MLXArray?
+    private var valuesScales: MLXArray?
+    private var valuesBiases: MLXArray?
+
+    /// Whether the cache is currently quantized
+    private var isQuantized: Bool = false
+
+    /// Quantization configuration
+    public var quantizationConfig: KVCacheQuantizationConfig = .none
+
     /// Chunk size for pre-allocation (reduces allocation frequency)
     /// 256 tokens = good balance between memory waste and allocation frequency
     public static let chunkSize: Int = 256
 
-    public init() {}
+    public init(quantizationConfig: KVCacheQuantizationConfig = .none) {
+        self.quantizationConfig = quantizationConfig
+    }
 
     /// Update cache with new keys and values using optimized chunked allocation
     /// Uses in-place writes when possible, only allocates when capacity exceeded
+    /// Automatically quantizes when threshold is reached
     public func update(keys newKeys: MLXArray, values newValues: MLXArray) -> (MLXArray, MLXArray) {
         let newTokens = newKeys.dim(2)
         let requiredCapacity = currentLength + newTokens
+
+        // If quantized, dequantize first for the update
+        if isQuantized {
+            dequantizeCache()
+        }
 
         // Check if we need to expand the buffer
         if keysBuffer == nil || requiredCapacity > allocatedCapacity {
             expandBuffer(newKeys: newKeys, newValues: newValues, requiredCapacity: requiredCapacity)
         } else {
             // Append new data to existing buffer
-            // This is more efficient than repeated small concatenations
             let validKeys = keysBuffer![0..., 0..., 0..<currentLength, 0...]
             let validValues = valuesBuffer![0..., 0..., 0..<currentLength, 0...]
 
@@ -96,6 +147,13 @@ public class KVCache {
         }
 
         currentLength = requiredCapacity
+
+        // Check if we should quantize (threshold reached and not already quantized)
+        if !isQuantized &&
+           quantizationConfig.bits > 0 &&
+           currentLength >= quantizationConfig.quantizeThreshold {
+            quantizeCache()
+        }
 
         // Return only the valid portion of the cache
         let validKeys = keysBuffer![0..., 0..., 0..<currentLength, 0...]
@@ -107,19 +165,106 @@ public class KVCache {
     /// Expand buffer to accommodate more tokens
     private func expandBuffer(newKeys: MLXArray, newValues: MLXArray, requiredCapacity: Int) {
         if let existingKeys = keysBuffer, let existingValues = valuesBuffer, currentLength > 0 {
-            // Expand existing buffer: concatenate old valid data with new data
             let validKeys = existingKeys[0..., 0..., 0..<currentLength, 0...]
             let validValues = existingValues[0..., 0..., 0..<currentLength, 0...]
 
             keysBuffer = concatenated([validKeys, newKeys], axis: 2)
             valuesBuffer = concatenated([validValues, newValues], axis: 2)
         } else {
-            // First allocation: just store the new data
             keysBuffer = newKeys
             valuesBuffer = newValues
         }
 
         allocatedCapacity = keysBuffer!.dim(2)
+    }
+
+    // MARK: - Quantization Methods
+
+    /// Quantize the cache to reduce memory usage
+    /// Call this after reaching a certain sequence length for long-context generation
+    public func quantizeCache() {
+        guard let keys = keysBuffer, let values = valuesBuffer, currentLength > 0 else { return }
+        guard !isQuantized else { return }
+        guard quantizationConfig.bits > 0 else { return }
+
+        // Get valid portion
+        let validKeys = keys[0..., 0..., 0..<currentLength, 0...]
+        let validValues = values[0..., 0..., 0..<currentLength, 0...]
+
+        // Reshape from [B, H, S, D] to [B*H*S, D] for quantization
+        let shape = validKeys.shape
+        let batchSize = shape[0]
+        let numHeads = shape[1]
+        let seqLen = shape[2]
+        let headDim = shape[3]
+
+        // Ensure headDim is divisible by groupSize (pad if needed)
+        let groupSize = quantizationConfig.groupSize
+        let paddedHeadDim = ((headDim + groupSize - 1) / groupSize) * groupSize
+
+        if headDim == paddedHeadDim && headDim % 32 == 0 {
+            // Reshape to 2D: [B*H*S, D]
+            let keysFlat = validKeys.reshaped([batchSize * numHeads * seqLen, headDim])
+            let valuesFlat = validValues.reshaped([batchSize * numHeads * seqLen, headDim])
+
+            // Quantize
+            let (qk, sk, bk) = MLX.quantized(keysFlat, groupSize: groupSize, bits: quantizationConfig.bits)
+            let (qv, sv, bv) = MLX.quantized(valuesFlat, groupSize: groupSize, bits: quantizationConfig.bits)
+
+            // Store quantized data
+            quantizedKeys = qk
+            keysScales = sk
+            keysBiases = bk
+
+            quantizedValues = qv
+            valuesScales = sv
+            valuesBiases = bv
+
+            isQuantized = true
+
+            // Clear full-precision buffers to save memory
+            keysBuffer = nil
+            valuesBuffer = nil
+        }
+        // If dimensions don't work for quantization, keep full precision
+    }
+
+    /// Dequantize the cache back to full precision
+    private func dequantizeCache() {
+        guard isQuantized else { return }
+        guard let qk = quantizedKeys, let sk = keysScales,
+              let qv = quantizedValues, let sv = valuesScales else { return }
+
+        // Dequantize
+        let keysFlat = MLX.dequantized(
+            qk, scales: sk, biases: keysBiases,
+            groupSize: quantizationConfig.groupSize,
+            bits: quantizationConfig.bits
+        )
+        let valuesFlat = MLX.dequantized(
+            qv, scales: sv, biases: valuesBiases,
+            groupSize: quantizationConfig.groupSize,
+            bits: quantizationConfig.bits
+        )
+
+        // Store dequantized data back to buffers
+        keysBuffer = keysFlat
+        valuesBuffer = valuesFlat
+
+        // Clear quantized data
+        quantizedKeys = nil
+        keysScales = nil
+        keysBiases = nil
+        quantizedValues = nil
+        valuesScales = nil
+        valuesBiases = nil
+
+        isQuantized = false
+    }
+
+    /// Whether the cache is currently in quantized state
+    public var quantized: Bool {
+        return isQuantized
     }
 
     /// Current length of cached sequence (number of valid tokens)
@@ -137,17 +282,43 @@ public class KVCache {
         return allocatedCapacity
     }
 
+    /// Estimated memory usage in bytes
+    public var estimatedMemoryBytes: Int {
+        if isQuantized {
+            // Quantized: bits per element
+            let elementsPerArray = currentLength * (quantizedKeys?.dim(1) ?? 128)
+            let bitsPerElement = quantizationConfig.bits
+            return (elementsPerArray * bitsPerElement / 8) * 2  // keys + values
+        } else {
+            // Full precision: 4 bytes per float32
+            guard let keys = keysBuffer else { return 0 }
+            let elementsPerArray = keys.shape.reduce(1, *)
+            return elementsPerArray * 4 * 2  // keys + values, float32
+        }
+    }
+
     /// Clear the cache to free memory
     public func clear() {
         keysBuffer = nil
         valuesBuffer = nil
+        quantizedKeys = nil
+        keysScales = nil
+        keysBiases = nil
+        quantizedValues = nil
+        valuesScales = nil
+        valuesBiases = nil
         currentLength = 0
         allocatedCapacity = 0
+        isQuantized = false
     }
 
     /// Trim cache to release unused memory
-    /// Call this after generation to free pre-allocated but unused space
     public func trim() {
+        if isQuantized {
+            // Can't easily trim quantized cache
+            return
+        }
+
         guard let keys = keysBuffer, let values = valuesBuffer, currentLength > 0 else {
             clear()
             return
