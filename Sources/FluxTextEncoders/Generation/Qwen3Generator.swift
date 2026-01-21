@@ -125,7 +125,7 @@ public final class Qwen3Generator: @unchecked Sendable {
 
             // Periodically clear GPU cache
             if (i + 1) % 20 == 0 {
-                GPU.clearCache()
+                Memory.clearCache()
             }
         }
 
@@ -148,7 +148,7 @@ public final class Qwen3Generator: @unchecked Sendable {
 
         // Clear KV cache to free memory
         cache.forEach { $0.clear() }
-        MLX.GPU.clearCache()
+        MLX.Memory.clearCache()
 
         return GenerationResult(
             text: outputText,
@@ -250,7 +250,7 @@ public final class Qwen3Generator: @unchecked Sendable {
             )
 
             if (i + 1) % 20 == 0 {
-                GPU.clearCache()
+                Memory.clearCache()
             }
         }
 
@@ -277,7 +277,7 @@ public final class Qwen3Generator: @unchecked Sendable {
         }
 
         cache.forEach { $0.clear() }
-        MLX.GPU.clearCache()
+        MLX.Memory.clearCache()
 
         return GenerationResult(
             text: outputText,
@@ -411,40 +411,32 @@ public final class Qwen3Generator: @unchecked Sendable {
     }
 
     /// GPU-optimized top-p (nucleus) sampling using MLX
+    /// Based on mlx-swift-lm implementation for compatibility with MLX 0.30+
     private func sampleTopPGPU(_ logits: MLXArray, temperature: Float, topP: Float) -> MLXArray {
-        // Apply temperature
-        let scaledLogits = logits / temperature
-
-        // Softmax for probabilities
-        let probs = softmax(scaledLogits, axis: -1)
+        // Apply temperature and softmax
+        let probs = softmax(logits / temperature, axis: -1)
 
         // Sort indices by probability (descending order)
         let sortedIndices = argSort(-probs, axis: -1)
 
-        // Gather sorted probabilities
-        let sortedProbs = probs[sortedIndices]
+        // Gather sorted probabilities using take() for MLX 0.30+ compatibility
+        let sortedProbs = MLX.take(probs, sortedIndices, axis: -1)
 
         // Compute cumulative probabilities
-        let cumProbs = cumsum(sortedProbs, axis: -1)
+        let cumulativeProbs = cumsum(sortedProbs, axis: -1)
 
-        // Create mask: keep tokens where cumulative prob < topP
-        let topPMask = cumProbs .< topP
+        // Create mask for top-p: keep tokens where cumulative prob > (1 - topP)
+        let topProbs = MLX.where(
+            cumulativeProbs .> (1 - topP),
+            sortedProbs,
+            MLX.zeros(like: sortedProbs)
+        )
 
-        // Apply mask
-        var maskedProbs = sortedProbs * topPMask.asType(sortedProbs.dtype)
-
-        // Ensure at least the top token has non-zero probability
-        maskedProbs = MLX.maximum(maskedProbs, sortedProbs * (cumProbs .<= sortedProbs).asType(sortedProbs.dtype))
-
-        // Re-normalize
-        let probSum = MLX.sum(maskedProbs, keepDims: true)
-        let normalizedProbs = maskedProbs / (probSum + 1e-10)
-
-        // Sample from categorical distribution
-        let sampledIdx = MLXRandom.categorical(MLX.log(normalizedProbs + 1e-10))
+        // Sample from categorical distribution using log probabilities
+        let sortedToken = MLXRandom.categorical(MLX.log(topProbs + 1e-10))
 
         // Map back to original vocabulary index
-        return sortedIndices[sampledIdx]
+        return sortedIndices[sortedToken]
     }
 
     /// Strip empty thinking tags from output text

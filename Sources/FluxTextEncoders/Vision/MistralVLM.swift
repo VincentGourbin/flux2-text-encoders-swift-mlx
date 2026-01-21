@@ -671,7 +671,7 @@ extension MistralVLM {
         logMemory("After clearing allWeights dictionary")
 
         // Clear MLX cache to release any temporary buffers
-        MLX.GPU.clearCache()
+        Memory.clearCache()
         logMemory("After GPU cache clear")
 
         debugPrint("[VLM] VLM loaded successfully with \(weightCount) tensors"); fflush(stdout)

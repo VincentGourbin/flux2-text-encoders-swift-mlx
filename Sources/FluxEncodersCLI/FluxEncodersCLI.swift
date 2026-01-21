@@ -503,10 +503,10 @@ struct Upsample: AsyncParsableCommand {
     @Argument(help: "Input prompt to enhance")
     var prompt: String
 
-    @Option(name: .shortAndLong, help: "Mode: t2i (text-to-image) or i2i (image-to-image)")
+    @Option(name: .long, help: "Mode: t2i (text-to-image) or i2i (image-to-image)")
     var mode: String = "t2i"
 
-    @Option(name: .shortAndLong, help: "Reference image path (for i2i mode, embeddings will include image tokens)")
+    @Option(name: [.customShort("i"), .long], help: "Reference image path (for i2i mode, embeddings will include image tokens)")
     var image: String?
 
     @Option(name: .shortAndLong, help: "Output file for embeddings (optional, .bin or .npy)")

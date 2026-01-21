@@ -274,9 +274,9 @@ public final class FluxProfiler: @unchecked Sendable {
     /// Take a memory snapshot
     public static func snapshot() -> MemorySnapshot {
         MemorySnapshot(
-            mlxActive: GPU.activeMemory,
-            mlxCache: GPU.cacheMemory,
-            mlxPeak: GPU.peakMemory,
+            mlxActive: Memory.activeMemory,
+            mlxCache: Memory.cacheMemory,
+            mlxPeak: Memory.peakMemory,
             processFootprint: getProcessMemoryFootprint(),
             timestamp: Date()
         )
@@ -296,7 +296,7 @@ public final class FluxProfiler: @unchecked Sendable {
         generatedTokenCount = 0
         decodingTime = 0
         steps.removeAll()
-        GPU.resetPeakMemory()
+        Memory.peakMemory = 0
         initialSnapshot = Self.snapshot()
     }
 
@@ -471,7 +471,7 @@ public final class FluxProfiler: @unchecked Sendable {
 
     /// Clear MLX cache and take new snapshot
     public func clearCacheAndSnapshot() -> MemorySnapshot {
-        GPU.clearCache()
+        Memory.clearCache()
         return Self.snapshot()
     }
 

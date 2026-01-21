@@ -394,7 +394,8 @@ public class TekkenTokenizer {
     public func decode(_ tokens: [Int], skipSpecialTokens: Bool = true) -> String {
         // Use HuggingFace tokenizer if available
         if useHFTokenizer, let tokenizer = hfTokenizer {
-            return tokenizer.decode(tokens: tokens, skipSpecialTokens: skipSpecialTokens)
+            // swift-transformers 0.1.14+ doesn't have skipSpecialTokens parameter
+            return tokenizer.decode(tokens: tokens)
         }
 
         // Tekken tokenizer - accumulate bytes for proper UTF-8 decoding
@@ -468,23 +469,12 @@ public class TekkenTokenizer {
     ) -> String {
         // Try using HuggingFace tokenizer's chat template if available
         if useHFTokenizer, let tokenizer = hfTokenizer {
-            let hfMessages: [[String: any Sendable]] = messages.map { msg in
-                var result: [String: any Sendable] = [:]
-                for (key, value) in msg {
-                    result[key] = value
-                }
-                return result
-            }
-
-            // Check if tokenizer has chat template
-            if tokenizer.hasChatTemplate {
-                do {
-                    let tokens = try tokenizer.applyChatTemplate(messages: hfMessages)
-                    // Decode and return
-                    return tokenizer.decode(tokens: tokens)
-                } catch {
-                    FluxDebug.log("HF chat template failed: \(error), using manual format")
-                }
+            do {
+                let tokens = try tokenizer.applyChatTemplate(messages: messages)
+                // Decode and return
+                return tokenizer.decode(tokens: tokens)
+            } catch {
+                FluxDebug.log("HF chat template failed: \(error), using manual format")
             }
         }
 
@@ -516,21 +506,10 @@ public class TekkenTokenizer {
     ) -> [Int] {
         // Try using HuggingFace tokenizer's chat template if available
         if useHFTokenizer, let tokenizer = hfTokenizer {
-            let hfMessages: [[String: any Sendable]] = messages.map { msg in
-                var result: [String: any Sendable] = [:]
-                for (key, value) in msg {
-                    result[key] = value
-                }
-                return result
-            }
-
-            // Check if tokenizer has chat template
-            if tokenizer.hasChatTemplate {
-                do {
-                    return try tokenizer.applyChatTemplate(messages: hfMessages)
-                } catch {
-                    FluxDebug.log("HF chat template failed: \(error), using manual format")
-                }
+            do {
+                return try tokenizer.applyChatTemplate(messages: messages)
+            } catch {
+                FluxDebug.log("HF chat template failed: \(error), using manual format")
             }
         }
 

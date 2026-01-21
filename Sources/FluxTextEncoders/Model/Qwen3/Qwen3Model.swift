@@ -202,13 +202,13 @@ public class Qwen3ForCausalLM: Module {
             // For regular embeddings, use standard matmul
             if let quantizedEmbed = model.embed_tokens as? QuantizedEmbedding {
                 // QuantizedEmbedding stores weight as quantized [vocab_size, hidden_size/pack_ratio]
-                // Use MLX.quantizedMatmul for proper computation
+                // Use MLX.quantizedMM for proper computation
                 // hiddenStates: [batch, seq, hidden_size]
                 // weight: [vocab_size, hidden_size] (quantized)
                 // scales: [vocab_size, num_groups]
                 // biases: [vocab_size, num_groups]
                 // transpose = true means we compute hiddenStates @ weight.T
-                return MLX.quantizedMatmul(
+                return MLX.quantizedMM(
                     hiddenStates,
                     quantizedEmbed.weight,
                     scales: quantizedEmbed.scales,

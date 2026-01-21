@@ -27,13 +27,11 @@ public class Qwen3RoPE: Module {
     }
 
     public func callAsFunction(_ x: MLXArray, offset: Int = 0) -> MLXArray {
-        // Use the optimized MLXFast.RoPE implementation
-        let shape = x.shape
-        var x = x.reshaped(-1, x.dim(-2), x.dim(-1))
-        x = MLXFast.RoPE(
+        // Use MLXFast.RoPE directly without reshaping (fix for mlx-swift 0.30.2)
+        // PR #316: reshaping before RoPE causes incorrect behavior with non-zero offsets
+        return MLXFast.RoPE(
             x, dimensions: dimensions, traditional: traditional, base: base, scale: scale,
             offset: offset)
-        return x.reshaped(shape)
     }
 }
 

@@ -36,3 +36,4 @@ models/
 # Environment files
 .env
 .env.local
+.build-xcode/

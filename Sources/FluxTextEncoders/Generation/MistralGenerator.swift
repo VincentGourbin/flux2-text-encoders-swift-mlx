@@ -188,7 +188,7 @@ public final class MistralGenerator: @unchecked Sendable {
 
             // Periodically clear GPU cache to prevent memory accumulation
             if (i + 1) % 20 == 0 {
-                GPU.clearCache()
+                Memory.clearCache()
             }
         }
 
@@ -212,7 +212,7 @@ public final class MistralGenerator: @unchecked Sendable {
 
         // Clear KV cache to free memory
         cache.forEach { $0.clear() }
-        MLX.GPU.clearCache()
+        MLX.Memory.clearCache()
 
         return GenerationResult(
             text: outputText,
@@ -320,7 +320,7 @@ public final class MistralGenerator: @unchecked Sendable {
 
             // Periodically clear GPU cache to prevent memory accumulation
             if (i + 1) % 20 == 0 {
-                GPU.clearCache()
+                Memory.clearCache()
             }
         }
 
@@ -349,7 +349,7 @@ public final class MistralGenerator: @unchecked Sendable {
 
         // Clear KV cache to free memory
         cache.forEach { $0.clear() }
-        MLX.GPU.clearCache()
+        MLX.Memory.clearCache()
 
         return GenerationResult(
             text: outputText,
@@ -422,41 +422,33 @@ public final class MistralGenerator: @unchecked Sendable {
     }
 
     /// GPU-optimized top-p (nucleus) sampling using MLX
+    /// Based on mlx-swift-lm implementation for compatibility with MLX 0.30+
     private func sampleTopPGPU(_ logits: MLXArray, temperature: Float, topP: Float) -> MLXArray {
-        // Apply temperature
-        let scaledLogits = logits / temperature
-
-        // Softmax for probabilities
-        let probs = softmax(scaledLogits, axis: -1)
+        // Apply temperature and softmax
+        let probs = softmax(logits / temperature, axis: -1)
 
         // Sort indices by probability (descending order)
         let sortedIndices = argSort(-probs, axis: -1)
 
-        // Gather sorted probabilities
-        let sortedProbs = probs[sortedIndices]
+        // Gather sorted probabilities using take() for MLX 0.30+ compatibility
+        // For 1D input, take() returns same shape
+        let sortedProbs = MLX.take(probs, sortedIndices, axis: -1)
 
         // Compute cumulative probabilities
-        let cumProbs = cumsum(sortedProbs, axis: -1)
+        let cumulativeProbs = cumsum(sortedProbs, axis: -1)
 
-        // Create mask: keep tokens where cumulative prob < topP (shifted by one)
-        // Include the first token that crosses topP threshold
-        let topPMask = cumProbs .< topP
+        // Create mask for top-p: keep tokens where cumulative prob > (1 - topP)
+        let topProbs = MLX.where(
+            cumulativeProbs .> (1 - topP),
+            sortedProbs,
+            MLX.zeros(like: sortedProbs)
+        )
 
-        // Shift mask to include one more token (the one that crosses threshold)
-        // By using < instead of <= and ensuring at least one token
-        var maskedProbs = sortedProbs * topPMask.asType(sortedProbs.dtype)
-
-        // Ensure at least the top token has non-zero probability
-        maskedProbs = MLX.maximum(maskedProbs, sortedProbs * (cumProbs .<= sortedProbs).asType(sortedProbs.dtype))
-
-        // Re-normalize
-        let probSum = MLX.sum(maskedProbs, keepDims: true)
-        let normalizedProbs = maskedProbs / (probSum + 1e-10)
-
-        // Sample from categorical distribution (expects logits/log-probs)
-        let sampledIdx = MLXRandom.categorical(MLX.log(normalizedProbs + 1e-10))
+        // Sample from categorical distribution using log probabilities
+        let sortedToken = MLXRandom.categorical(MLX.log(topProbs + 1e-10))
 
         // Map back to original vocabulary index
-        return sortedIndices[sampledIdx]
+        // sortedToken is a scalar, use it to index sortedIndices
+        return sortedIndices[sortedToken]
     }
 }

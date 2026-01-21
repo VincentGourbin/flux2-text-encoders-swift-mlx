@@ -16,9 +16,9 @@ struct MemoryStats {
 
     static var current: MemoryStats {
         MemoryStats(
-            active: GPU.activeMemory,
-            cache: GPU.cacheMemory,
-            peak: GPU.peakMemory
+            active: Memory.activeMemory,
+            cache: Memory.cacheMemory,
+            peak: Memory.peakMemory
         )
     }
 }
@@ -424,12 +424,12 @@ class ModelManager: ObservableObject {
     // MARK: - Memory Management
 
     func clearCache() {
-        GPU.clearCache()
+        Memory.clearCache()
         memoryStats = MemoryStats.current
     }
 
     func resetPeakMemory() {
-        GPU.resetPeakMemory()
+        Memory.peakMemory = 0
         memoryStats = MemoryStats.current
     }
 

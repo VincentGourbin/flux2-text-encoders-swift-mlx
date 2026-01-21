@@ -147,7 +147,7 @@ public final class FluxTextEncoders: @unchecked Sendable {
         kleinExtractor = nil
         qwen3Tokenizer = nil
         loadedKleinVariant = nil
-        MLX.GPU.clearCache()
+        Memory.clearCache()
         FluxDebug.log("Model unloaded")
     }
     
@@ -244,7 +244,7 @@ public final class FluxTextEncoders: @unchecked Sendable {
         qwen3Tokenizer = nil
         loadedKleinVariant = nil
         qwen3Generator = nil
-        MLX.GPU.clearCache()
+        Memory.clearCache()
         FluxDebug.log("Klein model unloaded")
     }
 
@@ -466,7 +466,7 @@ public final class FluxTextEncoders: @unchecked Sendable {
 
             // Periodically clear GPU cache to prevent memory accumulation
             if (i + 1) % 20 == 0 {
-                MLX.GPU.clearCache()
+                Memory.clearCache()
             }
         }
 
@@ -485,7 +485,7 @@ public final class FluxTextEncoders: @unchecked Sendable {
         // Clear KV cache to free memory
         cache.forEach { $0.clear() }
         logInferenceMemory("After KV cache clear")
-        MLX.GPU.clearCache()
+        Memory.clearCache()
         logInferenceMemory("After GPU cache clear")
 
         return GenerationResult(

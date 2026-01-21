@@ -19,8 +19,7 @@ public class ModelDownloader {
     nonisolated(unsafe) private static var hubApi: HubApi = {
         setenv("CI_DISABLE_NETWORK_MONITOR", "1", 1)
         return HubApi(
-            downloadBase: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
-            useOfflineMode: false
+            downloadBase: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
         )
     }()
 
@@ -195,20 +194,12 @@ public class ModelDownloader {
         let modelUrl = try await Self.hubApi.snapshot(
             from: model.repoId,
             matching: ["*.json", "*.safetensors"]
-        ) { (downloadProgress: Progress, speed: Double?) in
+        ) { downloadProgress in
             let completed = downloadProgress.completedUnitCount
             let total = downloadProgress.totalUnitCount
             let fraction = downloadProgress.fractionCompleted
 
-            // Format speed
-            let speedStr: String
-            if let speed = speed, speed > 0 {
-                speedStr = " (\(Self.formatSize(Int64(speed)))/s)"
-            } else {
-                speedStr = ""
-            }
-
-            let message = "Downloading file \(completed)/\(total)\(speedStr)"
+            let message = "Downloading file \(completed)/\(total)"
             progress?(fraction, message)
         }
 
@@ -299,19 +290,12 @@ public class ModelDownloader {
         let modelUrl = try await Self.hubApi.snapshot(
             from: model.repoId,
             matching: ["*.json", "*.safetensors", "tokenizer.model"]
-        ) { (downloadProgress: Progress, speed: Double?) in
+        ) { downloadProgress in
             let completed = downloadProgress.completedUnitCount
             let total = downloadProgress.totalUnitCount
             let fraction = downloadProgress.fractionCompleted
-            
-            let speedStr: String
-            if let speed = speed, speed > 0 {
-                speedStr = " (\(Self.formatSize(Int64(speed)))/s)"
-            } else {
-                speedStr = ""
-            }
-            
-            let message = "Downloading file \(completed)/\(total)\(speedStr)"
+
+            let message = "Downloading file \(completed)/\(total)"
             progress?(fraction, message)
         }
         
