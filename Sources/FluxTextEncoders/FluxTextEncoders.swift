@@ -413,9 +413,9 @@ public final class FluxTextEncoders: @unchecked Sendable {
         }
 
         for i in 0..<maxTokens {
-            // Sample next token
+            // Sample next token with repetition penalty
             let nextTokenLogits = logits[0, -1, 0...]
-            let nextToken = sampleToken(logits: nextTokenLogits, parameters: parameters)
+            let nextToken = sampleToken(logits: nextTokenLogits, parameters: parameters, generatedTokens: generatedTokens)
 
             // Force evaluation before sync - allows GPU work to complete
             MLX.eval(nextToken)
@@ -490,17 +490,44 @@ public final class FluxTextEncoders: @unchecked Sendable {
         return "[INST] \(imageToken)\n\(userPrompt) [/INST]"
     }
 
-    /// Sample token from logits
-    private func sampleToken(logits: MLXArray, parameters: GenerateParameters) -> MLXArray {
-        var probs = logits
+    /// Sample token from logits with repetition penalty
+    private func sampleToken(
+        logits: MLXArray,
+        parameters: GenerateParameters,
+        generatedTokens: [Int] = []
+    ) -> MLXArray {
+        var adjustedLogits = logits
+
+        // Apply repetition penalty to recently generated tokens
+        if parameters.repetitionPenalty != 1.0 && !generatedTokens.isEmpty {
+            // Get the last N tokens to penalize (use repetitionContextSize)
+            let contextSize = min(parameters.repetitionContextSize, generatedTokens.count)
+            let recentTokens = Array(generatedTokens.suffix(contextSize))
+
+            // Create a set for O(1) lookup
+            let tokenSet = Set(recentTokens)
+
+            // Apply penalty: divide positive logits, multiply negative logits
+            var logitsArray = adjustedLogits.asArray(Float.self)
+            for tokenId in tokenSet {
+                if tokenId >= 0 && tokenId < logitsArray.count {
+                    if logitsArray[tokenId] > 0 {
+                        logitsArray[tokenId] /= parameters.repetitionPenalty
+                    } else {
+                        logitsArray[tokenId] *= parameters.repetitionPenalty
+                    }
+                }
+            }
+            adjustedLogits = MLXArray(logitsArray)
+        }
 
         // Apply temperature
         if parameters.temperature > 0 {
-            probs = probs / parameters.temperature
+            adjustedLogits = adjustedLogits / parameters.temperature
         }
 
         // Apply softmax
-        probs = MLX.softmax(probs, axis: -1)
+        var probs = MLX.softmax(adjustedLogits, axis: -1)
 
         // Top-p sampling
         var sortedIndices: MLXArray? = nil

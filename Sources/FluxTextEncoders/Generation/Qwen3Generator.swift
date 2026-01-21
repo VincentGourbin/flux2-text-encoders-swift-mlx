@@ -73,11 +73,14 @@ public final class Qwen3Generator: @unchecked Sendable {
         var pendingTokens: [Int] = []
         let streamBatchSize = 10
 
-        // Sample first token (lazy)
+        // Sample first token (no history yet for repetition penalty)
         var nextTokenArray = sampleNextToken(
             logits: logits,
             temperature: parameters.temperature,
-            topP: parameters.topP
+            topP: parameters.topP,
+            repetitionPenalty: parameters.repetitionPenalty,
+            repetitionContextSize: parameters.repetitionContextSize,
+            generatedTokens: generatedTokens
         )
 
         for i in 0..<parameters.maxTokens {
@@ -110,11 +113,14 @@ public final class Qwen3Generator: @unchecked Sendable {
             inputIds = MLXArray([Int32(nextToken)]).reshaped([1, 1])
             logits = model.forward(inputIds, cache: cache)
 
-            // Sample next token (lazy - will be async eval'd at start of next iteration)
+            // Sample next token with repetition penalty (lazy - will be async eval'd at start of next iteration)
             nextTokenArray = sampleNextToken(
                 logits: logits,
                 temperature: parameters.temperature,
-                topP: parameters.topP
+                topP: parameters.topP,
+                repetitionPenalty: parameters.repetitionPenalty,
+                repetitionContextSize: parameters.repetitionContextSize,
+                generatedTokens: generatedTokens
             )
 
             // Periodically clear GPU cache
@@ -192,11 +198,14 @@ public final class Qwen3Generator: @unchecked Sendable {
         var pendingTokens: [Int] = []
         let streamBatchSize = 10
 
-        // Sample first token (lazy)
+        // Sample first token (no history yet for repetition penalty)
         var nextTokenArray = sampleNextToken(
             logits: logits,
             temperature: parameters.temperature,
-            topP: parameters.topP
+            topP: parameters.topP,
+            repetitionPenalty: parameters.repetitionPenalty,
+            repetitionContextSize: parameters.repetitionContextSize,
+            generatedTokens: generatedTokens
         )
 
         for i in 0..<parameters.maxTokens {
@@ -227,11 +236,14 @@ public final class Qwen3Generator: @unchecked Sendable {
             inputIds = MLXArray([Int32(nextToken)]).reshaped([1, 1])
             logits = model.forward(inputIds, cache: cache)
 
-            // Sample next token (lazy)
+            // Sample next token with repetition penalty (lazy)
             nextTokenArray = sampleNextToken(
                 logits: logits,
                 temperature: parameters.temperature,
-                topP: parameters.topP
+                topP: parameters.topP,
+                repetitionPenalty: parameters.repetitionPenalty,
+                repetitionContextSize: parameters.repetitionContextSize,
+                generatedTokens: generatedTokens
             )
 
             if (i + 1) % 20 == 0 {
@@ -297,9 +309,35 @@ public final class Qwen3Generator: @unchecked Sendable {
 
     // MARK: - Private Helpers
 
-    /// Sample next token from logits (returns lazy MLXArray for async eval)
-    private func sampleNextToken(logits: MLXArray, temperature: Float, topP: Float) -> MLXArray {
-        let lastLogits = logits[0, -1]
+    /// Sample next token from logits with repetition penalty (returns lazy MLXArray for async eval)
+    private func sampleNextToken(
+        logits: MLXArray,
+        temperature: Float,
+        topP: Float,
+        repetitionPenalty: Float = 1.0,
+        repetitionContextSize: Int = 20,
+        generatedTokens: [Int] = []
+    ) -> MLXArray {
+        var lastLogits = logits[0, -1]
+
+        // Apply repetition penalty to recently generated tokens
+        if repetitionPenalty != 1.0 && !generatedTokens.isEmpty {
+            let contextSize = min(repetitionContextSize, generatedTokens.count)
+            let recentTokens = Array(generatedTokens.suffix(contextSize))
+            let tokenSet = Set(recentTokens)
+
+            var logitsArray = lastLogits.asArray(Float.self)
+            for tokenId in tokenSet {
+                if tokenId >= 0 && tokenId < logitsArray.count {
+                    if logitsArray[tokenId] > 0 {
+                        logitsArray[tokenId] /= repetitionPenalty
+                    } else {
+                        logitsArray[tokenId] *= repetitionPenalty
+                    }
+                }
+            }
+            lastLogits = MLXArray(logitsArray)
+        }
 
         if temperature == 0 {
             return argMax(lastLogits)
