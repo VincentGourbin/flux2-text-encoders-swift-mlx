@@ -1450,7 +1450,6 @@ struct FluxToolsView: View {
 
                 case .upsamplingT2I, .upsamplingI2I:
                     let fluxMode: FluxConfig.Mode = selectedMode == .upsamplingT2I ? .upsamplingT2I : .upsamplingI2I
-                    let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
                     let hasImage = selectedMode == .upsamplingI2I && imagePath != nil
 
                     // Step 1: Generate enhanced prompt
@@ -1459,12 +1458,29 @@ struct FluxToolsView: View {
                     }
 
                     var enhancedPrompt = ""
-                    _ = try FluxTextEncoders.shared.chat(
-                        messages: messages,
-                        parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
-                    ) { token in
-                        enhancedPrompt += token
-                        return true
+
+                    if hasImage, let path = imagePath {
+                        // I2I with image: use VLM to analyze image with I2I system prompt
+                        // This allows the model to actually SEE the image
+                        _ = try FluxTextEncoders.shared.analyzeImage(
+                            path: path,
+                            prompt: prompt,
+                            systemPrompt: FluxConfig.systemMessage(for: .upsamplingI2I),
+                            parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
+                        ) { token in
+                            enhancedPrompt += token
+                            return true
+                        }
+                    } else {
+                        // T2I or I2I without image: use text-only chat
+                        let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
+                        _ = try FluxTextEncoders.shared.chat(
+                            messages: messages,
+                            parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
+                        ) { token in
+                            enhancedPrompt += token
+                            return true
+                        }
                     }
 
                     // Step 2: Extract embeddings
