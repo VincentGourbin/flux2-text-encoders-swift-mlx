@@ -225,9 +225,15 @@ public final class MistralGenerator: @unchecked Sendable {
     }
 
     /// Generate with chat template
+    /// - Parameters:
+    ///   - messages: Chat messages
+    ///   - parameters: Generation parameters
+    ///   - stream: If true, call onToken incrementally; if false, call once at end with complete text
+    ///   - onToken: Callback for token output
     public func chat(
         messages: [[String: String]],
         parameters: GenerateParameters = .balanced,
+        stream: Bool = true,
         onToken: ((String) -> Bool)? = nil
     ) throws -> GenerationResult {
         let startTime = Date()
@@ -284,8 +290,8 @@ public final class MistralGenerator: @unchecked Sendable {
 
             generatedTokens.append(nextToken)
 
-            // Batched streaming
-            if hasCallback {
+            // Batched streaming (only if stream mode is enabled)
+            if stream && hasCallback {
                 pendingTokens.append(nextToken)
                 if pendingTokens.count >= streamBatchSize {
                     let decodeStart = CFAbsoluteTimeGetCurrent()
@@ -318,8 +324,8 @@ public final class MistralGenerator: @unchecked Sendable {
             }
         }
 
-        // Flush remaining pending tokens
-        if hasCallback && !pendingTokens.isEmpty {
+        // Flush remaining pending tokens (streaming mode)
+        if stream && hasCallback && !pendingTokens.isEmpty {
             let decodeStart = CFAbsoluteTimeGetCurrent()
             let tokenText = tokenizer.decode(pendingTokens, skipSpecialTokens: true)
             profiler.addDecodingTime(CFAbsoluteTimeGetCurrent() - decodeStart)
@@ -335,6 +341,11 @@ public final class MistralGenerator: @unchecked Sendable {
         let decodeStart = CFAbsoluteTimeGetCurrent()
         let outputText = tokenizer.decode(generatedTokens, skipSpecialTokens: true)
         profiler.addDecodingTime(CFAbsoluteTimeGetCurrent() - decodeStart)
+
+        // Non-streaming mode: call callback once with complete text
+        if !stream && hasCallback {
+            _ = onToken!(outputText)
+        }
 
         // Clear KV cache to free memory
         cache.forEach { $0.clear() }

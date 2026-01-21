@@ -165,11 +165,13 @@ public final class Qwen3Generator: @unchecked Sendable {
     ///   - messages: Array of message dictionaries with "role" and "content" keys
     ///   - parameters: Generation parameters
     ///   - enableThinking: Enable Qwen3 thinking mode (default: false for FLUX.2 usage)
+    ///   - stream: If true, call onToken incrementally; if false, call once at end with complete text
     ///   - onToken: Optional callback for streaming tokens
     public func chat(
         messages: [[String: String]],
         parameters: GenerateParameters = .balanced,
         enableThinking: Bool = false,
+        stream: Bool = true,
         onToken: ((String) -> Bool)? = nil
     ) throws -> GenerationResult {
         let startTime = Date()
@@ -221,7 +223,8 @@ public final class Qwen3Generator: @unchecked Sendable {
 
             generatedTokens.append(nextToken)
 
-            if hasCallback {
+            // Batched streaming (only if stream mode is enabled)
+            if stream && hasCallback {
                 pendingTokens.append(nextToken)
                 if pendingTokens.count >= streamBatchSize {
                     let tokenText = tokenizer.decode(tokens: pendingTokens)
@@ -251,7 +254,8 @@ public final class Qwen3Generator: @unchecked Sendable {
             }
         }
 
-        if hasCallback && !pendingTokens.isEmpty {
+        // Flush remaining pending tokens (streaming mode)
+        if stream && hasCallback && !pendingTokens.isEmpty {
             let tokenText = tokenizer.decode(tokens: pendingTokens)
             _ = onToken!(tokenText)
         }
@@ -265,6 +269,11 @@ public final class Qwen3Generator: @unchecked Sendable {
         // Strip empty thinking tags when thinking is disabled
         if !enableThinking {
             outputText = stripEmptyThinkingTags(outputText)
+        }
+
+        // Non-streaming mode: call callback once with complete text
+        if !stream && hasCallback {
+            _ = onToken!(outputText)
         }
 
         cache.forEach { $0.clear() }

@@ -263,15 +263,21 @@ public final class FluxTextEncoders: @unchecked Sendable {
     }
 
     /// Generate with chat messages
+    /// - Parameters:
+    ///   - messages: Chat messages
+    ///   - parameters: Generation parameters
+    ///   - stream: If true, call onToken incrementally; if false, call once at end with complete text
+    ///   - onToken: Callback for token output
     public func chat(
         messages: [[String: String]],
         parameters: GenerateParameters = .balanced,
+        stream: Bool = true,
         onToken: ((String) -> Bool)? = nil
     ) throws -> GenerationResult {
         guard let generator = generator else {
             throw FluxEncoderError.modelNotLoaded
         }
-        return try generator.chat(messages: messages, parameters: parameters, onToken: onToken)
+        return try generator.chat(messages: messages, parameters: parameters, stream: stream, onToken: onToken)
     }
 
     // MARK: - Qwen3 Generation
@@ -289,15 +295,21 @@ public final class FluxTextEncoders: @unchecked Sendable {
     }
 
     /// Generate with chat messages using Qwen3 model
+    /// - Parameters:
+    ///   - messages: Chat messages
+    ///   - parameters: Generation parameters
+    ///   - stream: If true, call onToken incrementally; if false, call once at end with complete text
+    ///   - onToken: Callback for token output
     public func chatQwen3(
         messages: [[String: String]],
         parameters: GenerateParameters = .balanced,
+        stream: Bool = true,
         onToken: ((String) -> Bool)? = nil
     ) throws -> GenerationResult {
         guard let generator = qwen3Generator else {
             throw FluxEncoderError.kleinNotLoaded
         }
-        return try generator.chat(messages: messages, parameters: parameters, onToken: onToken)
+        return try generator.chat(messages: messages, parameters: parameters, stream: stream, onToken: onToken)
     }
 
     /// Check if Qwen3 generation is available
@@ -407,7 +419,6 @@ public final class FluxTextEncoders: @unchecked Sendable {
         let cache = vlm.createCache()
         logInferenceMemory("After KV cache creation")
         var generatedTokens: [Int] = []
-        var outputText = ""
         let maxTokens = parameters.maxTokens
         let startTime = Date()
 
@@ -449,25 +460,22 @@ public final class FluxTextEncoders: @unchecked Sendable {
 
             generatedTokens.append(Int(tokenId))
 
-            // Decode and stream
-            let tokenText = tokenizer.decode([Int(tokenId)], skipSpecialTokens: true)
-            outputText += tokenText
-
-            if let callback = onToken {
-                if !callback(tokenText) {
-                    break
-                }
-            }
-
             // Next forward pass (text only, using cache)
             let nextInput = MLXArray([tokenId]).expandedDimensions(axis: 0)
             logits = vlm(nextInput, pixelValues: nil, cache: cache)
 
             // Periodically clear GPU cache to prevent memory accumulation
-            // Every 20 tokens, clear temporary buffers (keeps KV cache intact)
             if (i + 1) % 20 == 0 {
                 MLX.GPU.clearCache()
             }
+        }
+
+        // Decode all tokens at once for correct multi-byte character handling
+        let outputText = tokenizer.decode(generatedTokens, skipSpecialTokens: true)
+
+        // Call callback once with complete text (if provided)
+        if let callback = onToken {
+            _ = callback(outputText)
         }
 
         let totalTime = Date().timeIntervalSince(startTime)

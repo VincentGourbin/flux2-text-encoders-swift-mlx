@@ -120,8 +120,12 @@ let messages = FluxConfig.buildMessages(
     mode: .upsamplingT2I
 )
 
-// Generate enhanced prompt
-let result = try core.chat(messages: messages, parameters: .balanced)
+// Generate enhanced prompt (stream: false for short FLUX.2 outputs)
+let result = try core.chat(
+    messages: messages,
+    parameters: .balanced,
+    stream: false
+)
 print(result.text)
 // Output: "A fluffy orange tabby cat with bright green eyes, sitting gracefully
 // on a sunlit wooden floor. Soft natural lighting from a nearby window creates
@@ -252,6 +256,35 @@ public struct GenerateParameters {
     static let creative: GenerateParameters // temperature=0.9
 }
 ```
+
+## Streaming Mode
+
+The `chat()` function supports a `stream` parameter to control token output:
+
+```swift
+// stream: false (recommended for FLUX.2 upsampling)
+// Callback called once at the end with complete text
+let result = try core.chat(
+    messages: messages,
+    parameters: .balanced,
+    stream: false
+) { text in
+    print(text)  // Complete text, correctly decoded
+    return true
+}
+
+// stream: true (default, for long conversations)
+// Callback called incrementally with batches of ~10 tokens
+let result = try core.chat(
+    messages: messages,
+    stream: true
+) { chunk in
+    print(chunk, terminator: "")  // Streaming output
+    return true
+}
+```
+
+**Note:** For FLUX.2 upsampling tasks, use `stream: false` to ensure correct UTF-8 character handling. The `analyzeImage()` function always uses non-streaming mode internally.
 
 ## Export Embeddings
 

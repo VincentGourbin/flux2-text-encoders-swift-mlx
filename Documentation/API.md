@@ -133,7 +133,7 @@ let result = try FluxTextEncoders.shared.generate(
 print("\nTokens/sec: \(result.tokensPerSecond)")
 ```
 
-### chat(messages:parameters:onToken:)
+### chat(messages:parameters:stream:onToken:)
 
 Multi-turn chat with conversation history.
 
@@ -141,6 +141,7 @@ Multi-turn chat with conversation history.
 public func chat(
     messages: [[String: String]],
     parameters: GenerateParameters = GenerateParameters(),
+    stream: Bool = true,
     onToken: ((String) -> Bool)? = nil
 ) throws -> GenerationResult
 ```
@@ -148,6 +149,7 @@ public func chat(
 **Parameters:**
 - `messages`: Array of message dictionaries with "role" and "content" keys
 - Supported roles: `"system"`, `"user"`, `"assistant"`
+- `stream`: If `true` (default), callback is called incrementally with batches of ~10 tokens. If `false`, callback is called once at the end with complete text.
 
 **Example:**
 ```swift
@@ -155,7 +157,15 @@ let messages = [
     ["role": "system", "content": "You are a helpful assistant."],
     ["role": "user", "content": "What's the capital of France?"]
 ]
+
+// Streaming mode (default)
 let result = try FluxTextEncoders.shared.chat(messages: messages)
+
+// Non-streaming mode (recommended for FLUX.2 upsampling)
+let result = try FluxTextEncoders.shared.chat(
+    messages: messages,
+    stream: false
+)
 print(result.text)
 ```
 
@@ -179,7 +189,7 @@ public func generateQwen3(
 **Parameters:**
 - `enableThinking`: Enable Qwen3 thinking mode (default: false for FLUX.2 usage)
 
-### chatQwen3(messages:parameters:enableThinking:onToken:)
+### chatQwen3(messages:parameters:stream:onToken:)
 
 Multi-turn chat with Qwen3 model.
 
@@ -187,16 +197,20 @@ Multi-turn chat with Qwen3 model.
 public func chatQwen3(
     messages: [[String: String]],
     parameters: GenerateParameters = .balanced,
-    enableThinking: Bool = false,
+    stream: Bool = true,
     onToken: ((String) -> Bool)? = nil
 ) throws -> GenerationResult
 ```
+
+**Parameters:**
+- `stream`: If `true` (default), callback is called incrementally. If `false`, callback is called once at the end with complete text.
 
 **Example:**
 ```swift
 let result = try FluxTextEncoders.shared.chatQwen3(
     messages: [["role": "user", "content": "Enhance this prompt: A cat"]],
-    parameters: GenerateParameters(maxTokens: 500, temperature: 0.7)
+    parameters: GenerateParameters(maxTokens: 500, temperature: 0.7),
+    stream: false  // Recommended for FLUX.2 Klein upsampling
 )
 print(result.text)
 ```
@@ -205,7 +219,7 @@ print(result.text)
 
 ## Vision Analysis (Mistral VLM)
 
-### analyzeImage(path:prompt:parameters:onToken:)
+### analyzeImage(path:prompt:systemPrompt:parameters:onToken:)
 
 Analyze an image using the Mistral VLM model.
 
@@ -213,6 +227,7 @@ Analyze an image using the Mistral VLM model.
 public func analyzeImage(
     path: String,
     prompt: String,
+    systemPrompt: String? = nil,
     parameters: GenerateParameters = GenerateParameters(),
     onToken: ((String) -> Bool)? = nil
 ) throws -> GenerationResult
@@ -221,13 +236,25 @@ public func analyzeImage(
 **Parameters:**
 - `path`: Path to image file (PNG, JPG)
 - `prompt`: Question or instruction about the image
+- `systemPrompt`: Optional system prompt (e.g., for FLUX.2 I2I upsampling)
+- `onToken`: Callback called once at the end with complete text (no streaming)
 
 **Example:**
 ```swift
 try await FluxTextEncoders.shared.loadVLMModel(variant: .mlx4bit)
+
+// Basic image analysis
 let result = try FluxTextEncoders.shared.analyzeImage(
     path: "/path/to/photo.jpg",
     prompt: "What objects are in this image?"
+)
+print(result.text)
+
+// FLUX.2 I2I upsampling with system prompt
+let result = try FluxTextEncoders.shared.analyzeImage(
+    path: "/path/to/image.png",
+    prompt: "Make it look more dramatic",
+    systemPrompt: FluxConfig.systemMessage(for: .upsamplingI2I)
 )
 print(result.text)
 ```

@@ -592,21 +592,22 @@ struct Upsample: AsyncParsableCommand {
             }
         } else {
             // T2I or I2I without image: use text-only chat
+            // Use stream: false for FLUX.2 upsampling (short outputs, no need for streaming)
             let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
             result = try core.chat(
                 messages: messages,
-                parameters: genOptions.parameters
-            ) { token in
-                if !noStream {
-                    print(token, terminator: "")
-                    fflush(stdout)
-                }
+                parameters: genOptions.parameters,
+                stream: false
+            ) { text in
+                // Called once with complete text
+                print(text, terminator: "")
+                fflush(stdout)
                 return true
             }
         }
 
         if noStream {
-            print(result.text)
+            // Already printed via callback, just add newline
         }
 
         print("\n\n--- Stats ---")
