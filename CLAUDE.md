@@ -42,12 +42,24 @@ After building, the CLI is at `.build/release/FluxEncodersCLI`:
 # Extract FLUX.2 embeddings
 .build/release/FluxEncodersCLI embed "Your text" --flux --output embeddings.bin
 
+# Prompt upsampling (T2I)
+.build/release/FluxEncodersCLI upsample "a cat" --mode t2i
+
+# Prompt upsampling with image (I2I) - VLM analyzes the image
+.build/release/FluxEncodersCLI upsample "make it dramatic" --mode i2i --image photo.jpg
+
 # Vision analysis
 .build/release/FluxEncodersCLI vision image.jpg "What's in this image?"
 
 # Model management
 .build/release/FluxEncodersCLI models
 .build/release/FluxEncodersCLI models --download mistral-8bit
+```
+
+**Note:** For Metal GPU support, build with xcodebuild:
+```bash
+xcodebuild -scheme FluxEncodersCLI -configuration Release -destination "platform=macOS" -derivedDataPath .build/xcode build
+# Then use: .build/xcode/Build/Products/Release/FluxEncodersCLI
 ```
 
 ## Architecture
@@ -115,3 +127,8 @@ python Scripts/Benchmark/benchmark_python.py
 - `HF_TOKEN` - HuggingFace token for model downloads
 - `VLM_DEBUG` - Enable VLM debugging output
 - `FLUX_DEBUG` - Enable general debug logging
+
+## API Documentation
+
+For detailed FLUX.2 API usage when integrating this library into another project, see:
+- **[Documentation/FLUX2_API.md](Documentation/FLUX2_API.md)** - Complete API reference for FLUX.2 embeddings, upsampling, and VLM integration

@@ -568,23 +568,41 @@ struct Upsample: AsyncParsableCommand {
             }
         }
 
-        // Build messages with appropriate system prompt
-        let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
-
         print("\n--- Original Prompt ---")
         print(prompt)
         print("\n--- Enhanced Prompt ---\n")
 
         // Generate enhanced prompt
-        let result = try core.chat(
-            messages: messages,
-            parameters: genOptions.parameters
-        ) { token in
-            if !noStream {
-                print(token, terminator: "")
-                fflush(stdout)
+        let result: GenerationResult
+
+        if let imagePath = image, fluxMode == .upsamplingI2I {
+            // I2I with image: use VLM to analyze image with I2I system prompt
+            // This allows the model to actually SEE the image and generate appropriate instructions
+            result = try core.analyzeImage(
+                path: imagePath,
+                prompt: prompt,
+                systemPrompt: FluxConfig.systemMessage(for: .upsamplingI2I),
+                parameters: genOptions.parameters
+            ) { token in
+                if !noStream {
+                    print(token, terminator: "")
+                    fflush(stdout)
+                }
+                return true
             }
-            return true
+        } else {
+            // T2I or I2I without image: use text-only chat
+            let messages = FluxConfig.buildMessages(prompt: prompt, mode: fluxMode)
+            result = try core.chat(
+                messages: messages,
+                parameters: genOptions.parameters
+            ) { token in
+                if !noStream {
+                    print(token, terminator: "")
+                    fflush(stdout)
+                }
+                return true
+            }
         }
 
         if noStream {

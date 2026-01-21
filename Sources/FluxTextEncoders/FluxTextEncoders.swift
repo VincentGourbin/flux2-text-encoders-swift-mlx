@@ -324,9 +324,18 @@ public final class FluxTextEncoders: @unchecked Sendable {
         fflush(stdout)
     }
 
+    /// Analyze an image with a text prompt and optional system prompt
+    /// - Parameters:
+    ///   - image: NSImage to analyze
+    ///   - prompt: Text prompt describing what to look for
+    ///   - systemPrompt: Optional system prompt (e.g., for FLUX.2 I2I upsampling)
+    ///   - parameters: Generation parameters
+    ///   - onToken: Callback for streaming tokens
+    /// - Returns: Generated description/analysis
     public func analyzeImage(
         image: NSImage,
         prompt: String,
+        systemPrompt: String? = nil,
         parameters: GenerateParameters = .balanced,
         onToken: ((String) -> Bool)? = nil
     ) throws -> GenerationResult {
@@ -338,7 +347,11 @@ public final class FluxTextEncoders: @unchecked Sendable {
 
         let debug = ProcessInfo.processInfo.environment["VLM_DEBUG"] != nil
 
-        if debug { print("[Analyze] Starting with prompt: \(prompt)"); fflush(stdout) }
+        if debug {
+            print("[Analyze] Starting with prompt: \(prompt)")
+            if let sys = systemPrompt { print("[Analyze] System prompt: \(sys.prefix(80))...") }
+            fflush(stdout)
+        }
         logInferenceMemory("START inference")
 
         // 1. Preprocess image
@@ -357,18 +370,26 @@ public final class FluxTextEncoders: @unchecked Sendable {
 
         // 3. Build input tokens with image token placeholders
         // IMPORTANT: We must insert actual image token IDs (10), not tokenize "[IMG]" string!
-        // Format: <s> [INST] [IMG][IMG]...[IMG] {user_prompt} [/INST]
+        // Format with system prompt: <s> [INST] {system_prompt}\n\n[IMG]...[IMG]\n{user_prompt} [/INST]
+        // Format without system prompt: <s> [INST] [IMG]...[IMG]\n{user_prompt} [/INST]
         let imageTokenId = vlm.config.imageTokenIndex  // = 10
 
         // Build tokens directly:
         // - BOS token (1)
         // - [INST] token (3)
+        // - optional system prompt + \n\n
         // - numImageTokens x image token (10)
         // - tokenized user prompt
         // - [/INST] token (4)
         var inputTokens: [Int] = []
         inputTokens.append(tokenizer.bosToken)  // <s>
         inputTokens.append(3)  // [INST]
+
+        // Add system prompt if provided
+        if let sysPrompt = systemPrompt {
+            inputTokens.append(contentsOf: tokenizer.encode(sysPrompt + "\n\n", addSpecialTokens: false))
+        }
+
         inputTokens.append(contentsOf: Array(repeating: imageTokenId, count: numImageTokens))
         inputTokens.append(contentsOf: tokenizer.encode("\n\(prompt) ", addSpecialTokens: false))
         inputTokens.append(4)  // [/INST]
@@ -470,9 +491,17 @@ public final class FluxTextEncoders: @unchecked Sendable {
     }
 
     /// Analyze image from file path
+    /// - Parameters:
+    ///   - path: Path to image file
+    ///   - prompt: Text prompt describing what to look for
+    ///   - systemPrompt: Optional system prompt (e.g., for FLUX.2 I2I upsampling)
+    ///   - parameters: Generation parameters
+    ///   - onToken: Callback for streaming tokens
+    /// - Returns: Generated description/analysis
     public func analyzeImage(
         path: String,
         prompt: String,
+        systemPrompt: String? = nil,
         parameters: GenerateParameters = .balanced,
         onToken: ((String) -> Bool)? = nil
     ) throws -> GenerationResult {
@@ -481,7 +510,7 @@ public final class FluxTextEncoders: @unchecked Sendable {
         }
 
         let image = try processor.loadImage(from: path)
-        return try analyzeImage(image: image, prompt: prompt, parameters: parameters, onToken: onToken)
+        return try analyzeImage(image: image, prompt: prompt, systemPrompt: systemPrompt, parameters: parameters, onToken: onToken)
     }
 
     /// Format vision prompt following Mistral chat template
