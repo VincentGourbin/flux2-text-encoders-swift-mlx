@@ -31,6 +31,14 @@ Supports both **Mistral Small 3.2** (for FLUX.2 dev) and **Qwen3** (for FLUX.2 K
 - Xcode 15.0+ (for building)
 - ~12GB RAM minimum (8-bit model)
 
+## Dependencies
+
+| Package | Version | Description |
+|---------|---------|-------------|
+| [mlx-swift](https://github.com/ml-explore/mlx-swift) | 0.30.2+ | MLX array framework for Apple Silicon |
+| [swift-transformers](https://github.com/huggingface/swift-transformers) | 1.1.6+ | HuggingFace tokenizers and Hub API |
+| [swift-argument-parser](https://github.com/apple/swift-argument-parser) | 1.2.0+ | Command-line argument parsing |
+
 ## Installation
 
 ### Swift Package Manager
@@ -219,6 +227,20 @@ Sources/
 ## API Documentation
 
 See [Documentation/API.md](Documentation/API.md) for complete API reference.
+
+## Changelog
+
+### v1.1.0 (January 2025)
+- **Upgraded to mlx-swift 0.30.2** - Latest MLX framework with improved performance
+- **Upgraded to swift-transformers 1.1.6** - Latest HuggingFace tokenizers with Swift 6 support
+- **Fixed RoPE bug** - Resolved text generation issues with KV cache (repetition/corruption)
+- **Memory API updates** - Internal migration from `GPU.*` to `Memory.*` namespace
+
+### v1.0.0 (January 2025)
+- Initial release with Mistral Small 3.2 and Qwen3 support
+- FLUX.2 dev/pro and Klein embeddings extraction
+- Vision analysis with Pixtral encoder
+- Native macOS SwiftUI application
 
 ## License
 
