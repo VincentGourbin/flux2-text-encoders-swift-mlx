@@ -1,5 +1,23 @@
 # FLUX.2 Text Encoders - Swift MLX
 
+> [!IMPORTANT]
+> ## This project has been merged into [flux-2-swift-mlx](https://github.com/VincentGourbin/flux-2-swift-mlx)
+>
+> This repository is now **archived**. All text encoder functionality has been integrated into the complete FLUX.2 inference pipeline:
+>
+> **[https://github.com/VincentGourbin/flux-2-swift-mlx](https://github.com/VincentGourbin/flux-2-swift-mlx)**
+>
+> The new repository provides:
+> - Complete FLUX.2 image generation (not just text encoding)
+> - Text encoders (Mistral, Qwen3) - from this project
+> - VAE decoder
+> - Transformer/DiT model
+> - Full inference pipeline
+>
+> Please use the new repository for all future development.
+
+---
+
 Native Swift implementation of text encoders for FLUX.2 image generation on Apple Silicon using the MLX framework.
 Supports both **Mistral Small 3.2** (for FLUX.2 dev) and **Qwen3** (for FLUX.2 Klein).
 
